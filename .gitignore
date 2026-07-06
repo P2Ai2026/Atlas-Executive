@@ -149,3 +149,8 @@ vite.config.ts.timestamp-*
 release/
 *.dmg
 *.zip.blockmap
+
+# Python (agents/)
+.venv/
+__pycache__/
+*.pyc

@@ -12,31 +12,53 @@ const exec = util.promisify(execFile);
 
 const OLLAMA_BASE = 'http://127.0.0.1:11434/api';
 
+// Agents ship inside this repo under agents/. Legacy Desktop paths are kept
+// as fallbacks so a machine with the original standalone folders still works.
+const REPO_AGENTS = path.join(__dirname, '..', 'agents');
+
 const AGENT_CONFIG = {
   stocks: {
-    name:           'Distressed Stocks',
-    icon:           '📉',
-    outputDir:      path.join(os.homedir(), 'Desktop', 'Distress Reports'),
-    filePattern:    /^distress_report_.*\.pdf$/i,
-    runScript:      path.join(os.homedir(), 'Desktop', 'Agent 1- Distressed Stocks', 'weekly_run.py'),
-    fallbackScript: path.join(os.homedir(), 'Desktop', 'internship', 'weekly_run.py'),
-    venvDir:        path.join(os.homedir(), 'Desktop', 'Agent 1- Distressed Stocks', '.venv'),
-    fallbackVenv:   path.join(os.homedir(), 'Desktop', 'internship', '.venv'),
+    name:        'Distressed Stocks',
+    icon:        '📉',
+    outputDir:   path.join(os.homedir(), 'Desktop', 'Distress Reports'),
+    outputEnv:   'DISTRESS_OUTPUT_DIR',   // passed to the script so both agree
+    filePattern: /^distress_report_.*\.pdf$/i,
+    scriptCandidates: [
+      path.join(REPO_AGENTS, 'stocks', 'weekly_run.py'),
+      path.join(os.homedir(), 'Desktop', 'Agent 1- Distressed Stocks', 'weekly_run.py'),
+      path.join(os.homedir(), 'Desktop', 'internship', 'weekly_run.py'),
+    ],
+    venvCandidates: [
+      path.join(REPO_AGENTS, 'stocks', '.venv'),
+      path.join(os.homedir(), 'Desktop', 'Agent 1- Distressed Stocks', '.venv'),
+      path.join(os.homedir(), 'Desktop', 'internship', '.venv'),
+    ],
   },
   podcast: {
     name:        'Podcast Intel',
     icon:        '🎙️',
     outputDir:   path.join(os.homedir(), 'Desktop', 'Agent 3- Podcast Reviews'),
+    outputEnv:   'PODCAST_OUTPUT_DIR',
     filePattern: /^podcast_brief_.*\.pdf$/i,
     // Run the podcast agent DIRECTLY — weekly_run.py runs both agents and
     // skips itself when the week's distress report exists, which made this
     // button silently do nothing.
-    runScript:   path.join(os.homedir(), 'Desktop', 'internship', 'podcast_intel_agent.py'),
-    venvDir:     path.join(os.homedir(), 'Desktop', 'internship', '.venv'),
+    scriptCandidates: [
+      path.join(REPO_AGENTS, 'podcast', 'podcast_intel_agent.py'),
+      path.join(os.homedir(), 'Desktop', 'internship', 'podcast_intel_agent.py'),
+    ],
+    venvCandidates: [
+      path.join(REPO_AGENTS, 'podcast', '.venv'),
+      path.join(os.homedir(), 'Desktop', 'internship', '.venv'),
+    ],
     // The agent also writes signals_latest.json every run (daily Signal Radar)
     signalsFile: path.join(os.homedir(), 'Desktop', 'Agent 3- Podcast Reviews', 'signals_latest.json'),
   },
 };
+
+function firstExisting(candidates) {
+  return (candidates || []).find(p => fs.existsSync(p)) || null;
+}
 
 // ── PDF listing ───────────────────────────────────────────────────────────────
 
@@ -126,8 +148,7 @@ const inFlight = {}; // key → start timestamp
 
 function resolvePython(agentKey) {
   const cfg = AGENT_CONFIG[agentKey];
-  const dirs = [cfg.venvDir, cfg.fallbackVenv].filter(Boolean);
-  for (const d of dirs) {
+  for (const d of cfg.venvCandidates || []) {
     const py = path.join(d, 'bin', 'python3');
     if (fs.existsSync(py)) return py;
   }
@@ -146,13 +167,10 @@ function runAgent(agentKey, onReady) {
   }
   inFlight[agentKey] = Date.now();
 
-  let scriptPath = cfg.runScript;
-  if (!fs.existsSync(scriptPath)) {
-    if (cfg.fallbackScript && fs.existsSync(cfg.fallbackScript)) {
-      scriptPath = cfg.fallbackScript;
-    } else {
-      throw new Error(`Runner script not found: ${scriptPath}`);
-    }
+  const scriptPath = firstExisting(cfg.scriptCandidates);
+  if (!scriptPath) {
+    delete inFlight[agentKey];
+    throw new Error(`Runner script not found. Looked in:\n${cfg.scriptCandidates.join('\n')}`);
   }
 
   // Ensure output dir exists so we can watch it
@@ -163,11 +181,14 @@ function runAgent(agentKey, onReady) {
   const startTime = Date.now();
   let   notified  = false;
 
+  const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+  if (cfg.outputEnv) env[cfg.outputEnv] = cfg.outputDir;
+
   const child = spawn(python, [scriptPath], {
     cwd,
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    env,
   });
   child.unref();
 
