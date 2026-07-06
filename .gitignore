@@ -141,3 +141,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# macOS
+.DS_Store
+
+# Electron build output (electron-builder)
+release/
+*.dmg
+*.zip.blockmap

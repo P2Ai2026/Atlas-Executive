@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Assistant</title>
+<style>
+  :root {
+    --bg:        #0f0f13;
+    --surface:   #16161d;
+    --border:    #242430;
+    --accent:    #7b68ee;
+    --accent2:   #4ecdc4;
+    --red:       #e05c5c;
+    --amber:     #e8a84c;
+    --green:     #5cb85c;
+    --text:      #e8e8f0;
+    --muted:     #6b6b80;
+    --radius:    10px;
+    --font-mono: 'SF Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    -webkit-app-region: no-drag;
+  }
+
+  /* Title bar */
+  #titlebar {
+    height: 44px; -webkit-app-region: drag;
+    display: flex; align-items: center; padding: 0 80px 0 16px;
+    background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  #titlebar .app-name { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  #titlebar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 8px; animation: pulse 3s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* Layout */
+  #layout { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  #sidebar { width: 220px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px 0; }
+  .nav-section { padding: 0 12px; margin-bottom: 4px; }
+  .nav-label { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding: 12px 8px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13.5px; color: var(--muted); transition: all 0.15s; border: none; background: none; width: 100%; text-align: left; }
+  .nav-item:hover { background: var(--border); color: var(--text); }
+  .nav-item.active { background: rgba(123,104,238,0.15); color: var(--accent); }
+  .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+  #sidebar-footer { margin-top: auto; padding: 12px; border-top: 1px solid var(--border); }
+  #auth-btn { width: 100%; padding: 8px 12px; background: rgba(123,104,238,0.12); border: 1px solid rgba(123,104,238,0.3); border-radius: 7px; color: var(--accent); font-size: 12.5px; cursor: pointer; transition: all 0.15s; }
+  #auth-btn:hover { background: rgba(123,104,238,0.25); }
+  #auth-status { font-size: 11px; color: var(--muted); margin-top: 6px; text-align: center; }
+
+  /* Panels */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .panel { display: none; }
+  .panel.active { display: flex; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
+
+  /* ── Digest ── */
+  #panel-digest { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  .digest-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .digest-header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .digest-header .meta { font-size: 12px; color: var(--muted); }
+  #run-digest-btn { padding: 8px 16px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  #run-digest-btn:hover { opacity: 0.85; }
+  #run-digest-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #digest-content { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; line-height: 1.75; font-size: 14px; min-height: 200px; overflow: hidden; box-sizing: border-box; width: 100%; }
+  #digest-content .empty { color: var(--muted); font-style: italic; }
+  #digest-content .section-red   { color: var(--red);   font-weight: 700; font-size: 15px; margin: 16px 0 8px; display: block; }
+  #digest-content .section-amber { color: var(--amber); font-weight: 700; font-size: 15px; margin: 16px 0 8px; display: block; }
+  #digest-content .section-gray  { color: var(--muted); font-weight: 700; font-size: 15px; margin: 16px 0 8px; display: block; }
+  .brief-item { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
+  .brief-item-text { flex: 1; }
+  .brief-item.done .brief-item-text { text-decoration: line-through; opacity: 0.4; }
+  .done-btn {
+    flex-shrink: 0; padding: 2px 7px;
+    background: rgba(92,184,92,0.08); border: 1px solid rgba(92,184,92,0.2);
+    border-radius: 4px; color: var(--green); font-size: 11px;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap; opacity: 0.5;
+  }
+  .done-btn:hover { background: rgba(92,184,92,0.2); border-color: var(--green); opacity: 1; }
+  .brief-item.done .done-btn { opacity: 1; background: rgba(92,184,92,0.18); border-color: var(--green); }
+  .brief-item:hover .done-btn { opacity: 1; }
+  .action-btn {
+    flex-shrink: 0; padding: 2px 8px;
+    background: rgba(123,104,238,0.1); border: 1px solid rgba(123,104,238,0.25);
+    border-radius: 4px; color: var(--accent); font-size: 11px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap; opacity: 0.7;
+  }
+  .action-btn:hover { background: rgba(123,104,238,0.22); border-color: var(--accent); opacity: 1; }
+  .brief-item:hover .action-btn { opacity: 1; }
+
+  /* ── Agent panels ── */
+  .agent-panel { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  .agent-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .agent-header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .agent-header .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .agent-header-btns { display: flex; gap: 8px; align-items: center; }
+  .agent-run-btn { padding: 8px 16px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  .agent-run-btn:hover { opacity: 0.85; }
+  .agent-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .agent-running-badge { display: none; font-size: 12px; color: var(--accent2); background: rgba(78,205,196,0.1); border: 1px solid rgba(78,205,196,0.3); border-radius: 20px; padding: 4px 12px; }
+  .agent-running-badge.visible { display: inline-flex; align-items: center; gap: 6px; }
+  .agent-running-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent2); animation: pulse 1.2s ease-in-out infinite; }
+  .agent-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 24px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .pdf-log { display: flex; flex-direction: column; gap: 8px; }
+  .pdf-log-item { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; transition: border-color 0.15s; }
+  .pdf-log-item:hover { border-color: var(--accent); }
+  .pdf-log-icon { font-size: 22px; flex-shrink: 0; }
+  .pdf-log-body { flex: 1; min-width: 0; }
+  .pdf-log-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pdf-log-date { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .pdf-log-item.latest .pdf-log-name { color: var(--accent); }
+  .pdf-open-btn { flex-shrink: 0; padding: 6px 14px; background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; white-space: nowrap; }
+  .pdf-open-btn:hover { opacity: 0.85; }
+  .agent-empty { color: var(--muted); font-style: italic; font-size: 13px; padding: 20px 0; }
+
+  /* ── Paper Trail ── */
+  #panel-trail { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  .trail-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .trail-header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .trail-header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .trail-date-group { margin-bottom: 24px; }
+  .trail-date-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .trail-entry { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; display: flex; gap: 12px; align-items: flex-start; }
+  .trail-entry-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .trail-entry-body { flex: 1; min-width: 0; }
+  .trail-entry-text { font-size: 13.5px; color: var(--text); line-height: 1.5; margin-bottom: 4px; }
+  .trail-entry-action { font-size: 12px; color: var(--accent2); font-weight: 500; }
+  .trail-entry-time { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .trail-restore-btn { flex-shrink: 0; padding: 3px 10px; background: none; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-size: 11px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .trail-restore-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .trail-empty { color: var(--muted); font-style: italic; font-size: 13px; padding: 10px 0; }
+
+  /* ── Chat ── */
+  #panel-chat { flex-direction: column; }
+  #chat-messages { flex: 1; overflow-y: auto; padding: 20px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 80%; padding: 12px 16px; border-radius: 10px; font-size: 14px; line-height: 1.65; }
+  .msg.user { align-self: flex-end; background: rgba(123,104,238,0.2); border: 1px solid rgba(123,104,238,0.3); }
+  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); white-space: pre-wrap; }
+  .msg .sender { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+  .msg.user .sender { color: var(--accent); }
+  #chat-input-area { padding: 16px 28px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end; }
+  #chat-input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; padding: 10px 14px; resize: none; min-height: 42px; max-height: 120px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+  #chat-input:focus { border-color: var(--accent); }
+  #chat-send { padding: 10px 18px; background: var(--accent); border: none; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; height: 42px; transition: opacity 0.15s; }
+  #chat-send:hover { opacity: 0.85; }
+  #chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
+  .typing-indicator { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+  .typing-indicator span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s ease infinite; }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+
+  /* ── Calendar ── */
+  #panel-calendar { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .cal-header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  #refresh-cal-btn { padding: 8px 16px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  #refresh-cal-btn:hover { opacity: 0.85; }
+  #refresh-cal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .cal-day { margin-bottom: 20px; }
+  .cal-day-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .cal-day-label.today { color: var(--accent); }
+  .cal-event { display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+  .cal-event .event-time { font-size: 11px; color: var(--muted); font-family: var(--font-mono); min-width: 80px; padding-top: 2px; }
+  .cal-event .event-title { font-size: 13.5px; color: var(--text); }
+  .cal-event .event-cal { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .cal-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .cal-empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 10px 0; }
+
+  /* ── Contacts ── */
+  #panel-contacts { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  #panel-contacts h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
+  #panel-contacts .sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+  .contacts-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .contacts-section h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+  .contacts-section h3.star { color: var(--amber); }
+  .contacts-section h3.block { color: var(--red); }
+  .contacts-section .hint { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.5; }
+  .tag-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tag-input-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; padding: 8px 12px; font-family: var(--font-mono); outline: none; transition: border-color 0.15s; }
+  .tag-input-row input:focus { border-color: var(--accent); }
+  .tag-input-row button { padding: 8px 14px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  .tag-input-row button:hover { opacity: 0.85; }
+  .btn-add-star { background: var(--amber); color: #000; }
+  .btn-add-block { background: var(--red); color: #fff; }
+  .tag-list { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; }
+  .tag { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-family: var(--font-mono); }
+  .tag.star { background: rgba(232,168,76,0.15); border: 1px solid rgba(232,168,76,0.35); color: var(--amber); }
+  .tag.block { background: rgba(224,92,92,0.12); border: 1px solid rgba(224,92,92,0.3); color: var(--red); }
+  .tag-remove { background: none; border: none; cursor: pointer; color: inherit; opacity: 0.6; font-size: 14px; padding: 0; line-height: 1; }
+  .tag-remove:hover { opacity: 1; }
+  #save-contacts { margin-top: 8px; padding: 9px 20px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  #save-contacts:hover { opacity: 0.85; }
+
+  /* ── Profile ── */
+  #panel-profile { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  #panel-profile h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
+  #panel-profile .sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+  .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .profile-section h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .profile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .profile-field { display: flex; flex-direction: column; gap: 5px; }
+  .profile-field label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .profile-field input, .profile-field select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 13px; padding: 8px 10px; font-family: inherit;
+    outline: none; transition: border-color 0.15s;
+  }
+  .profile-field input:focus, .profile-field select:focus { border-color: var(--accent); }
+  .profile-field select option { background: var(--bg); }
+
+  /* People table */
+  .people-table-wrap { overflow-x: auto; margin-bottom: 14px; }
+  .people-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .people-table th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .people-table td { padding: 6px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .people-table tr:last-child td { border-bottom: none; }
+  .people-table input, .people-table select {
+    width: 100%; background: transparent; border: 1px solid transparent; border-radius: 5px;
+    color: var(--text); font-size: 12.5px; padding: 5px 7px; font-family: inherit;
+    outline: none; transition: border-color 0.15s;
+  }
+  .people-table input:focus, .people-table select:focus { border-color: var(--accent); background: var(--bg); }
+  .people-table select { background: transparent; }
+  .people-table select option { background: #1a1a24; }
+  .priority-critical { color: var(--red); }
+  .priority-high     { color: var(--amber); }
+  .priority-normal   { color: var(--text); }
+  .priority-low      { color: var(--muted); }
+  .btn-remove-person { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 4px; transition: all 0.15s; }
+  .btn-remove-person:hover { color: var(--red); background: rgba(224,92,92,0.1); }
+  .btn-add-person { padding: 7px 14px; background: rgba(123,104,238,0.12); border: 1px solid rgba(123,104,238,0.3); border-radius: 6px; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .btn-add-person:hover { background: rgba(123,104,238,0.22); }
+  .profile-first-run { background: rgba(123,104,238,0.08); border: 1px solid rgba(123,104,238,0.25); border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; font-size: 13px; color: var(--accent); line-height: 1.6; }
+  #save-profile { padding: 9px 20px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  #save-profile:hover { opacity: 0.85; }
+
+  /* ── Settings ── */
+  #panel-settings { min-height: 0; padding: 28px 32px; overflow-y: auto; }
+  #panel-settings h2 { font-size: 18px; font-weight: 700; margin-bottom: 24px; }
+  .settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .settings-section h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; padding: 8px 12px; font-family: var(--font-mono); outline: none; transition: border-color 0.15s; }
+  .field input:focus, .field textarea:focus { border-color: var(--accent); }
+  .field textarea { min-height: 60px; resize: vertical; }
+  #save-settings { padding: 9px 20px; background: var(--accent); border: none; border-radius: 7px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  #save-settings:hover { opacity: 0.85; }
+  .save-ok { color: var(--accent2); font-size: 12px; margin-left: 10px; opacity: 0; transition: opacity 0.3s; }
+  .save-ok.show { opacity: 1; }
+
+  /* Draft toast */
+  #draft-toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--accent2); border-radius: 10px; padding: 14px 18px; max-width: 340px; font-size: 13px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); transform: translateY(80px); opacity: 0; transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1); z-index: 100; }
+  #draft-toast.show { transform: translateY(0); opacity: 1; }
+  #draft-toast .toast-title { font-weight: 700; color: var(--accent2); margin-bottom: 4px; }
+  #draft-toast .toast-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+
+  /* ── Signal Radar ── */
+  .radar-meta-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+  .signal-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 8px; }
+  .signal-table th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .signal-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .signal-table tr:last-child td { border-bottom: none; }
+  .signal-term { font-weight: 600; }
+  .signal-shows { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .signal-delta { font-variant-numeric: tabular-nums; }
+  .signal-delta.up { color: #ff6b6b; font-weight: 700; }
+  .sig-badge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+  .sig-FRINGE-RISING    { background: rgba(220,38,38,0.16);  color: #f87171; border: 1px solid rgba(220,38,38,0.4); }
+  .sig-NEW              { background: rgba(124,58,237,0.16); color: #a78bfa; border: 1px solid rgba(124,58,237,0.4); }
+  .sig-GOING-MAINSTREAM { background: rgba(192,38,211,0.16); color: #e879f9; border: 1px solid rgba(192,38,211,0.4); }
+  .sig-EMERGING         { background: rgba(234,88,12,0.16);  color: #fb923c; border: 1px solid rgba(234,88,12,0.4); }
+  .sig-RISING           { background: rgba(232,168,76,0.14); color: var(--amber); border: 1px solid rgba(232,168,76,0.4); }
+  .sig-MAINSTREAM       { background: rgba(92,184,92,0.14);  color: #86efac; border: 1px solid rgba(92,184,92,0.4); }
+  .sig-STEADY           { background: rgba(107,114,128,0.14);color: var(--muted); border: 1px solid rgba(107,114,128,0.4); }
+  .radar-brief { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; font-size: 13.5px; line-height: 1.75; margin-bottom: 8px; }
+  .radar-brief h4 { font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent2); margin: 14px 0 6px; }
+  .radar-brief h4:first-child { margin-top: 0; }
+  .radar-episode-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+  .radar-chip { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); color: var(--text); background: rgba(255,255,255,0.03); }
+  .radar-chip .rel { font-weight: 700; margin-right: 5px; }
+  .radar-empty { color: var(--muted); font-style: italic; font-size: 13px; padding: 20px 0; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+  <div class="dot"></div>
+  <span class="app-name">Executive Assistant</span>
+</div>
+
+<div id="layout">
+  <div id="sidebar">
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <button class="nav-item active" data-panel="digest"><span class="icon">📋</span> Email Brief</button>
+      <button class="nav-item" data-panel="chat"><span class="icon">💬</span> Chat</button>
+      <button class="nav-item" data-panel="calendar"><span class="icon">📅</span> Calendar</button>
+      <button class="nav-item" data-panel="contacts"><span class="icon">👥</span> Sender Rules</button>
+      <button class="nav-item" data-panel="trail"><span class="icon">🗂️</span> The Paper Trail</button>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Agents</div>
+      <button class="nav-item" data-panel="signals"><span class="icon">📡</span> Signal Radar</button>
+      <button class="nav-item" data-panel="agent-stocks"><span class="icon">📉</span> Distressed Stocks</button>
+      <button class="nav-item" data-panel="agent-podcast"><span class="icon">🎙️</span> Podcast Intel</button>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configuration</div>
+      <button class="nav-item" data-panel="profile"><span class="icon">👤</span> Profile</button>
+      <button class="nav-item" data-panel="settings"><span class="icon">⚙️</span> Settings</button>
+    </div>
+    <div id="sidebar-footer">
+      <button id="auth-btn">Open Mail.app</button>
+      <div id="auth-status">Uses your existing Mail.app setup</div>
+    </div>
+  </div>
+
+  <div id="main">
+
+    <!-- Email Brief -->
+    <div id="panel-digest" class="panel active">
+      <div class="digest-header">
+        <div>
+          <h2>Email Brief</h2>
+          <div class="meta" id="digest-meta">Runs automatically at 10:00 AM and 6:00 PM</div>
+        </div>
+        <button id="run-digest-btn">Run Now</button>
+      </div>
+      <div id="digest-content">
+        <span class="empty">Your next brief will appear here. Click "Run Now" to generate one immediately.</span>
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div id="panel-chat" class="panel">
+      <div id="chat-messages">
+        <div class="msg assistant">
+          <div class="sender">Assistant</div>
+          Hello. I have context from your latest email brief and calendar. Ask me to follow up on anything, check your schedule, or draft a reply — I'll prepare it for your review before anything goes anywhere.
+        </div>
+      </div>
+      <div id="chat-input-area">
+        <textarea id="chat-input" placeholder="Ask me to follow up, check your calendar, or prep a draft…" rows="1"></textarea>
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+
+    <!-- Calendar -->
+    <div id="panel-calendar" class="panel">
+      <div class="cal-header">
+        <div>
+          <h2>Calendar</h2>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Today + next 7 days · Apple Calendar</div>
+        </div>
+        <button id="refresh-cal-btn">Refresh</button>
+      </div>
+      <div id="cal-content">
+        <span class="cal-empty">Click Refresh to load your calendar.</span>
+      </div>
+    </div>
+
+    <!-- Sender Rules -->
+    <div id="panel-contacts" class="panel">
+      <h2>Sender Rules</h2>
+      <div class="sub">Control how emails from specific addresses are handled automatically.</div>
+
+      <div class="contacts-section">
+        <h3 class="star">⭐ Priority Senders</h3>
+        <div class="hint">Emails from these addresses always appear at the top of your brief, marked as highest priority — even if the content seems routine.</div>
+        <div class="tag-input-row">
+          <input type="email" id="star-input" placeholder="boss@company.com">
+          <button class="btn-add-star" onclick="addTag('star')">+ Add</button>
+        </div>
+        <div class="tag-list" id="star-list"></div>
+      </div>
+
+      <div class="contacts-section">
+        <h3 class="block">🗑 Auto-Delete</h3>
+        <div class="hint">Emails from these addresses are permanently deleted before they ever reach your brief. No trace, no clutter.</div>
+        <div class="tag-input-row">
+          <input type="email" id="block-input" placeholder="newsletter@spam.com">
+          <button class="btn-add-block" onclick="addTag('block')">+ Add</button>
+        </div>
+        <div class="tag-list" id="block-list"></div>
+      </div>
+
+      <button id="save-contacts">Save Rules</button>
+      <span class="save-ok" id="save-contacts-ok">✓ Saved</span>
+    </div>
+
+    <!-- Profile -->
+    <div id="panel-profile" class="panel">
+      <h2>Profile</h2>
+      <div class="sub">Your identity and key contacts — used to personalise drafts, email tone, and the brief.</div>
+
+      <div id="profile-first-run" class="profile-first-run" style="display:none">
+        👋 Welcome! Fill in your name so the assistant can sign your drafts correctly, then add your key contacts.
+      </div>
+
+      <div class="profile-section">
+        <h3>Your Identity</h3>
+        <div class="profile-row">
+          <div class="profile-field">
+            <label>Your Name</label>
+            <input type="text" id="profile-name" placeholder="Your full name">
+          </div>
+          <div class="profile-field">
+            <label>Your Title / Role</label>
+            <input type="text" id="profile-title" placeholder="e.g. CEO, VP of Marketing">
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-section">
+        <h3>People</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">
+          Critical and High priority people always appear first in your brief. The AI adjusts email tone based on relationship — formal for Boss/Executive, warm for Friend/Family.
+        </div>
+        <div class="people-table-wrap">
+          <table class="people-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Relationship</th>
+                <th>Priority</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="people-tbody"></tbody>
+          </table>
+        </div>
+        <button class="btn-add-person" onclick="addPersonRow()">+ Add Person</button>
+      </div>
+
+      <button id="save-profile">Save Profile</button>
+      <span class="save-ok" id="save-profile-ok">✓ Saved</span>
+    </div>
+
+    <!-- Signal Radar -->
+    <div id="panel-signals" class="panel agent-panel">
+      <div class="agent-header">
+        <div>
+          <h2>📡 Signal Radar</h2>
+          <div class="meta" id="radar-generated">Daily scan · fringe → mainstream · fed by the podcast agent</div>
+        </div>
+        <div class="agent-header-btns">
+          <span class="agent-running-badge" id="radar-running-badge"><span class="agent-running-dot"></span>Scanning…</span>
+          <button class="agent-run-btn" id="radar-run-btn">Scan Now</button>
+        </div>
+      </div>
+
+      <div class="agent-section-label">Top Movers — 7-day mentions vs 3-week baseline</div>
+      <div id="radar-signals"><span class="radar-empty">No signal data yet. Click Scan Now to run the first daily scan.</span></div>
+
+      <div class="agent-section-label">Where the Change Is · What It Means · How to Act</div>
+      <div id="radar-brief"><span class="radar-empty">The daily brief will appear here after the first scan.</span></div>
+
+      <div class="agent-section-label">New Episodes in This Scan</div>
+      <div id="radar-episodes"><span class="radar-empty">—</span></div>
+    </div>
+
+    <!-- Distressed Stocks Agent -->
+    <div id="panel-agent-stocks" class="panel agent-panel">
+      <div class="agent-header">
+        <div>
+          <h2>📉 Distressed Stocks</h2>
+          <div class="meta">Runs Mondays at 10:00 AM · SEC filing scanner · permit research</div>
+        </div>
+        <div class="agent-header-btns">
+          <span class="agent-running-badge" id="stocks-running-badge"><span class="agent-running-dot"></span>Running…</span>
+          <button class="agent-run-btn" id="stocks-run-btn">Run Now</button>
+        </div>
+      </div>
+      <div class="agent-section-label">Reports</div>
+      <div class="pdf-log" id="stocks-pdf-log">
+        <span class="agent-empty">No reports yet. Click Run Now to generate the first one.</span>
+      </div>
+    </div>
+
+    <!-- Podcast Intel Agent -->
+    <div id="panel-agent-podcast" class="panel agent-panel">
+      <div class="agent-header">
+        <div>
+          <h2>🎙️ Podcast Intel</h2>
+          <div class="meta">Runs daily at 7:30 AM · 16 podcasts · AI + power infrastructure lens</div>
+        </div>
+        <div class="agent-header-btns">
+          <span class="agent-running-badge" id="podcast-running-badge"><span class="agent-running-dot"></span>Running…</span>
+          <button class="agent-run-btn" id="podcast-run-btn">Run Now</button>
+        </div>
+      </div>
+      <div class="agent-section-label">Reports</div>
+      <div class="pdf-log" id="podcast-pdf-log">
+        <span class="agent-empty">No reports yet. Click Run Now to generate the first one.</span>
+      </div>
+    </div>
+
+    <!-- Paper Trail -->
+    <div id="panel-trail" class="panel">
+      <div class="trail-header">
+        <div>
+          <h2>The Paper Trail</h2>
+          <div class="sub">Completed items, drafts created, and calendar events added</div>
+        </div>
+      </div>
+      <div id="trail-content">
+        <span class="trail-empty">No activity yet. Mark items done in the Email Brief or create drafts via Chat.</span>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="panel-settings" class="panel">
+      <h2>Settings</h2>
+      <div class="settings-section">
+        <h3>AI — Local Ollama</h3>
+        <div style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+          All AI runs on <strong style="color:var(--text)">your machine via Ollama (qwen2.5)</strong>. No API keys, no cost, nothing leaves your computer.
+        </div>
+        <div id="ollama-status" style="font-size:12px;color:var(--muted)">Checking Ollama…</div>
+      </div>
+      <div class="settings-section">
+        <h3>Mail Setup</h3>
+        <div style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+          Reads from <strong style="color:var(--text)">Mail.app</strong> via AppleScript — no passwords, no API keys. First run will ask for Automation permission; click Allow.
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Digest Schedule</h3>
+        <div class="field">
+          <label>Digest times (24h format, one per line)</label>
+          <textarea id="cfg-times" placeholder="10:00&#10;18:00"></textarea>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Signal Radar Schedule</h3>
+        <div class="field">
+          <label>Daily podcast scan time (24h format)</label>
+          <input type="text" id="cfg-signals-time" placeholder="07:30" style="width:120px">
+        </div>
+      </div>
+      <button id="save-settings">Save Settings</button>
+      <span class="save-ok" id="save-ok">✓ Saved</span>
+    </div>
+
+  </div>
+</div>
+
+<div id="draft-toast">
+  <button class="toast-close" onclick="hideDraftToast()">✕</button>
+  <div class="toast-title">✉️ Draft ready in Mail</div>
+  <div id="toast-body">Your draft has been saved. Review and send it when ready.</div>
+</div>
+
+<script>
+// ── Navigation ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+    if (btn.dataset.panel === 'calendar') loadCalendar();
+    if (btn.dataset.panel === 'signals')  loadSignals();
+    if (btn.dataset.panel === 'agent-stocks')  loadAgentPanel('stocks');
+    if (btn.dataset.panel === 'agent-podcast') loadAgentPanel('podcast');
+  });
+});
+
+function navigateTo(panelName) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const btn = document.querySelector(`.nav-item[data-panel="${panelName}"]`);
+  if (btn) btn.classList.add('active');
+  const panel = document.getElementById('panel-' + panelName);
+  if (panel) panel.classList.add('active');
+  if (panelName === 'signals')       loadSignals();
+  if (panelName === 'agent-stocks')  loadAgentPanel('stocks');
+  if (panelName === 'agent-podcast') loadAgentPanel('podcast');
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function checkAuth() {
+  document.getElementById('auth-status').textContent = '✓ Using Mail.app';
+  document.getElementById('auth-status').style.color = 'var(--accent2)';
+}
+document.getElementById('auth-btn').addEventListener('click', () => window.api.authStart());
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  checkAuth();
+  const cfg = await window.api.configGet();
+  document.getElementById('cfg-times').value = (cfg.digestTimes || ['10:00','18:00']).join('\n');
+  document.getElementById('cfg-signals-time').value = cfg.signalsTime || '07:30';
+
+  // Ollama check
+  try {
+    const res = await fetch('http://127.0.0.1:11434/api/tags');
+    if (res.ok) {
+      document.getElementById('ollama-status').textContent = '✓ Ollama is running';
+      document.getElementById('ollama-status').style.color = 'var(--accent2)';
+    }
+  } catch {
+    document.getElementById('ollama-status').textContent = '⚠ Ollama not detected — open the Ollama app first';
+    document.getElementById('ollama-status').style.color = 'var(--amber)';
+  }
+
+  // Load sender rules
+  renderTags('star', cfg.starlist || []);
+  renderTags('block', cfg.blocklist || []);
+
+  // Load profile
+  loadProfile(cfg);
+
+  // Auto-navigate to profile on first launch if name is missing
+  if (!cfg.userName) {
+    document.getElementById('profile-first-run').style.display = 'block';
+    navigateTo('profile');
+  }
+
+  const last = await window.api.digestLast();
+  if (last && last.text) renderDigest(last);
+
+  const trail = await window.api.trailGet();
+  renderTrail(trail);
+
+  // Pre-load the Signal Radar so it's populated the moment the tab is opened
+  loadSignals();
+}
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+let peopleList = [];
+
+function loadProfile(cfg) {
+  document.getElementById('profile-name').value = cfg.userName || '';
+  document.getElementById('profile-title').value = cfg.userTitle || '';
+  peopleList = cfg.people ? [...cfg.people] : [];
+  renderPeopleTable();
+}
+
+function renderPeopleTable() {
+  const tbody = document.getElementById('people-tbody');
+  tbody.innerHTML = '';
+  peopleList.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="${escAttr(p.name || '')}" onchange="updatePerson(${i},'name',this.value)" placeholder="Full Name"></td>
+      <td><input type="email" value="${escAttr(p.email || '')}" onchange="updatePerson(${i},'email',this.value)" placeholder="email@example.com"></td>
+      <td>
+        <select onchange="updatePerson(${i},'relationship',this.value)">
+          ${['Boss','Executive','Colleague','Client','Friend','Family','Other'].map(r =>
+            `<option value="${r}" ${p.relationship===r?'selected':''}>${r}</option>`
+          ).join('')}
+        </select>
+      </td>
+      <td>
+        <select class="priority-${(p.priority||'Normal').toLowerCase()}" onchange="updatePerson(${i},'priority',this.value);this.className='priority-'+this.value.toLowerCase()">
+          ${['Critical','High','Normal','Low'].map(pr =>
+            `<option value="${pr}" ${p.priority===pr?'selected':''}>${pr}</option>`
+          ).join('')}
+        </select>
+      </td>
+      <td><button class="btn-remove-person" onclick="removePerson(${i})" title="Remove">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updatePerson(i, field, val) {
+  if (peopleList[i]) peopleList[i][field] = val;
+}
+
+function addPersonRow() {
+  peopleList.push({ name: '', email: '', relationship: 'Colleague', priority: 'Normal' });
+  renderPeopleTable();
+  // Focus the first input of the new row
+  const rows = document.getElementById('people-tbody').querySelectorAll('tr');
+  if (rows.length) rows[rows.length - 1].querySelector('input')?.focus();
+}
+
+function removePerson(i) {
+  peopleList.splice(i, 1);
+  renderPeopleTable();
+}
+
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+document.getElementById('save-profile').addEventListener('click', async () => {
+  const name = document.getElementById('profile-name').value.trim();
+  const title = document.getElementById('profile-title').value.trim();
+  await window.api.configSave({ userName: name, userTitle: title, people: peopleList });
+  document.getElementById('profile-first-run').style.display = 'none';
+  const ok = document.getElementById('save-profile-ok');
+  ok.classList.add('show');
+  setTimeout(() => ok.classList.remove('show'), 2500);
+});
+
+// ── Digest ────────────────────────────────────────────────────────────────────
+let briefContexts = {};
+let briefEmailIds = {}; // idx → message ID for that specific email (if matched)
+let digestEmails = [];  // slim email list from last digest: [{ id, subject, from }]
+let doneItems = {}; // idx → true for struck-through items, resets each digest
+
+// Match a brief item's plain text to a specific email's message ID.
+// Extracts "Sender Name (Subject keyword)" from the item, then searches digestEmails.
+function findEmailIdForItem(itemText) {
+  if (!digestEmails.length) return null;
+  const m = itemText.match(/^([^(]+?)\s*\(([^)]+)\)/);
+  if (!m) return null;
+  const senderHint = m[1].trim().toLowerCase();
+  const subjectHint = m[2].trim().toLowerCase();
+  const match = digestEmails.find(e => {
+    const from = (e.from?.emailAddress?.address || '').toLowerCase();
+    const subject = (e.subject || '').toLowerCase();
+    const senderMatch = senderHint.split(' ').filter(w => w.length > 2).some(w => from.includes(w));
+    const subjectMatch = subjectHint.split(' ').filter(w => w.length > 3).some(w => subject.includes(w));
+    return senderMatch && subjectMatch;
+  });
+  return match?.id || null;
+}
+
+function renderDigest(d) {
+  if (d.error) {
+    document.getElementById('digest-content').innerHTML = `<span style="color:var(--red)">Error: ${d.error}</span>`;
+    return;
+  }
+
+  briefContexts = {};
+  briefEmailIds = {};
+  doneItems = {};
+  digestEmails = d.emails || [];
+  let ctxIdx = 0;
+
+  function mdToHtml(line) {
+    // Escape first — email subjects/previews are untrusted and must never
+    // reach innerHTML raw
+    line = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return line
+      .replace(/^(\s*[-•]\s+)([^(]+?)(\s*\([^)]+\))(\s*:)/, (_, bullet, name, paren, colon) =>
+        `${bullet}<strong>${name.trim()}</strong> <u>${paren.trim()}</u>${colon}`)
+      .replace(/\*\*🔴[^*]+\*\*/g, m => `<span class="section-red">${m.replace(/\*\*/g,'')}</span>`)
+      .replace(/\*\*⭐[^*]+\*\*/g, m => `<span class="section-red">${m.replace(/\*\*/g,'')}</span>`)
+      .replace(/\*\*🟡[^*]+\*\*/g, m => `<span class="section-amber">${m.replace(/\*\*/g,'')}</span>`)
+      .replace(/\*\*⚪[^*]+\*\*/g, m => `<span class="section-gray">${m.replace(/\*\*/g,'')}</span>`)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  // Group lines into blocks: each bullet item may span multiple lines
+  // A new item starts with "- " or "• "; section headers and blank lines are standalone
+  const lines = d.text.split('\n');
+  const blocks = []; // { type: 'item'|'other', lines: [] }
+
+  for (const line of lines) {
+    const isBulletStart = /^\s*[-•]\s+/.test(line);
+    const isSectionHeader = /^\s*\*\*/.test(line);
+    const isEmpty = line.trim() === '';
+
+    if (isBulletStart) {
+      blocks.push({ type: 'item', lines: [line] });
+    } else if (isSectionHeader || isEmpty) {
+      blocks.push({ type: 'other', lines: [line] });
+    } else {
+      // Continuation line — append to last item block if one exists, else standalone
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'item') {
+        last.lines.push(line);
+      } else {
+        blocks.push({ type: 'other', lines: [line] });
+      }
+    }
+  }
+
+  const htmlParts = blocks.map(block => {
+    if (block.type === 'item') {
+      // Plain-text context = all lines joined, stripped of markdown
+      const plainCtx = block.lines.join(' ')
+        .replace(/^\s*[-•]\s+/, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .trim()
+        .slice(0, 400);
+      const idx = ctxIdx++;
+      briefContexts[idx] = plainCtx;
+      const emailId = findEmailIdForItem(plainCtx);
+      if (emailId) briefEmailIds[idx] = emailId;
+      const innerHtml = block.lines.map(mdToHtml).join('<br>');
+      const doneClass = doneItems[idx] ? ' done' : '';
+      return `<div class="brief-item${doneClass}" data-item-idx="${idx}"><span class="brief-item-text">${innerHtml}</span><button class="done-btn" data-idx="${idx}" title="Mark done">✓</button><button class="action-btn" data-idx="${idx}" data-email-id="${emailId || ''}">Action →</button></div>`;
+    } else {
+      return block.lines.map(mdToHtml).join('\n');
+    }
+  });
+
+  document.getElementById('digest-content').innerHTML = htmlParts.join('\n');
+
+  const t = new Date(d.time);
+  document.getElementById('digest-meta').textContent =
+    `Last run: ${t.toLocaleDateString()} at ${t.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · ${d.count} emails`;
+}
+
+// Digest button clicks — done-btn and action-btn
+document.getElementById('digest-content').addEventListener('click', e => {
+  const doneBtn = e.target.closest('.done-btn');
+  if (doneBtn) { markDone(Number(doneBtn.dataset.idx)); return; }
+  const actionBtn = e.target.closest('.action-btn');
+  if (actionBtn) { actionItem(briefContexts[actionBtn.dataset.idx] || '', actionBtn.dataset.emailId || ''); }
+});
+
+async function markDone(idx) {
+  const ctx = briefContexts[idx];
+  if (!ctx) return;
+  doneItems[idx] = true;
+  const el = document.querySelector(`.brief-item[data-item-idx="${idx}"]`);
+  if (el) el.classList.add('done');
+  await window.api.trailAdd({ text: ctx, action: 'Marked complete', source: 'brief' });
+  renderTrail(await window.api.trailGet());
+}
+
+function actionItem(ctx, emailId) {
+  navigateTo('chat');
+  const input = document.getElementById('chat-input');
+  const idTag = emailId ? ` [EMAIL_ID:${emailId}]` : '';
+  input.value = 'Re: ' + ctx + idTag + ' — ';
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  input.focus();
+  // Place cursor at end
+  const len = input.value.length;
+  input.setSelectionRange(len, len);
+}
+
+// ── Signal Radar ──────────────────────────────────────────────────────────────
+function renderSignals(data) {
+  const sigEl   = document.getElementById('radar-signals');
+  const briefEl = document.getElementById('radar-brief');
+  const epsEl   = document.getElementById('radar-episodes');
+  const genEl   = document.getElementById('radar-generated');
+
+  if (!data) {
+    sigEl.innerHTML = '<span class="radar-empty">No signal data yet. Click Scan Now to run the first daily scan.</span>';
+    return;
+  }
+
+  const gen = new Date(data.generated);
+  genEl.textContent = `Last scan: ${gen.toLocaleDateString()} at ${gen.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · ${data.window_days}-day window vs ${data.baseline_days}-day baseline`;
+
+  // Top movers table
+  if (data.signals && data.signals.length) {
+    const rows = data.signals.slice(0, 15).map(s => {
+      const cls = 'sig-' + s.status.replace(/\s+/g, '-');
+      const vel = s.velocity == null
+        ? `<span class="signal-delta" style="color:var(--muted)">new</span>`
+        : s.velocity >= 1.5
+          ? `<span class="signal-delta up">▲ ${s.velocity}x</span>`
+          : `<span class="signal-delta">${s.velocity}x</span>`;
+      return `<tr>
+        <td><div class="signal-term">${escapeHtml(s.term)}</div>
+            <div class="signal-shows">${escapeHtml((s.shows || []).join(' · '))}</div></td>
+        <td class="signal-delta">${s.current}</td>
+        <td class="signal-delta">${s.baseline_weekly}</td>
+        <td>${vel}</td>
+        <td class="signal-delta">${s.breadth}</td>
+        <td><span class="sig-badge ${cls}">${escapeHtml(s.status)}</span></td>
+      </tr>`;
+    }).join('');
+    sigEl.innerHTML = `<table class="signal-table">
+      <thead><tr><th>Signal</th><th>7-day</th><th>Base/wk</th><th>Velocity</th><th># Shows</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  } else {
+    sigEl.innerHTML = '<span class="radar-empty">No active signals in the current window.</span>';
+  }
+
+  // The A/B/C brief — section headers become styled h4s, bullets become lines
+  if (data.synthesis) {
+    const html = data.synthesis.split('\n').map(line => {
+      const l = escapeHtml(line.trim());
+      if (!l) return '';
+      const hdr = l.match(/^\**([A-Z][A-Z \-/']{2,}):\**\s*(.*)$/);
+      if (hdr) return `<h4>${hdr[1]}</h4>${hdr[2] ? `<div>${hdr[2]}</div>` : ''}`;
+      return `<div>${l.replace(/^[\*\-•]\s+/, '• ')}</div>`;
+    }).join('');
+    briefEl.innerHTML = `<div class="radar-brief">${html}</div>`;
+  } else {
+    briefEl.innerHTML = '<span class="radar-empty">No brief in the latest scan.</span>';
+  }
+
+  // Episode chips
+  if (data.new_episodes && data.new_episodes.length) {
+    const relColor = { HIGH: 'var(--red)', MEDIUM: 'var(--amber)', LOW: 'var(--muted)' };
+    epsEl.innerHTML = '<div class="radar-episode-chips">' + data.new_episodes.map(e =>
+      `<span class="radar-chip"><span class="rel" style="color:${relColor[e.relevance] || 'var(--muted)'}">${escapeHtml(e.relevance || '')}</span>${escapeHtml(e.podcast)} — ${escapeHtml(e.title)}</span>`
+    ).join('') + '</div>';
+  } else {
+    epsEl.innerHTML = '<span class="radar-empty">No new episodes in this scan — signal windows still updated.</span>';
+  }
+}
+
+async function loadSignals() {
+  try {
+    renderSignals(await window.api.signalsGet());
+  } catch (err) {
+    document.getElementById('radar-signals').innerHTML =
+      `<span class="radar-empty" style="color:var(--red)">Error: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+document.getElementById('radar-run-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('radar-run-btn');
+  const badge = document.getElementById('radar-running-badge');
+  btn.disabled = true; btn.textContent = 'Scanning…';
+  badge.classList.add('visible');
+  try {
+    const result = await window.api.agentRun('podcast');
+    if (result.error) {
+      alert(`Could not launch scan: ${result.error}`);
+      badge.classList.remove('visible');
+      btn.disabled = false; btn.textContent = 'Scan Now';
+    }
+  } catch (err) {
+    alert(`Scan error: ${err.message}`);
+    badge.classList.remove('visible');
+    btn.disabled = false; btn.textContent = 'Scan Now';
+  }
+});
+
+window.api.onSignalsNew(data => {
+  const btn = document.getElementById('radar-run-btn');
+  const badge = document.getElementById('radar-running-badge');
+  btn.disabled = false; btn.textContent = 'Scan Now';
+  badge.classList.remove('visible');
+  renderSignals(data);
+});
+
+// ── Agent Hub ─────────────────────────────────────────────────────────────────
+function renderAgentReports(agentKey, reports) {
+  const logEl = document.getElementById(`${agentKey === 'stocks' ? 'stocks' : 'podcast'}-pdf-log`);
+  if (!logEl) return;
+  if (!reports || !reports.length) {
+    logEl.innerHTML = '<span class="agent-empty">No reports yet. Click Run Now to generate the first one.</span>';
+    return;
+  }
+  logEl.innerHTML = reports.map((r, i) => {
+    const d    = new Date(r.mtime);
+    const date = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const latestClass = i === 0 ? ' latest' : '';
+    const latestBadge = i === 0 ? ' <span style="font-size:10px;background:rgba(123,104,238,0.18);color:var(--accent);padding:1px 7px;border-radius:10px;font-weight:600;vertical-align:middle">Latest</span>' : '';
+    return `<div class="pdf-log-item${latestClass}" data-path="${r.path}">
+      <div class="pdf-log-icon">📄</div>
+      <div class="pdf-log-body">
+        <div class="pdf-log-name">${r.name}${latestBadge}</div>
+        <div class="pdf-log-date">${date} · ${time}</div>
+      </div>
+      <button class="pdf-open-btn" data-path="${r.path}">Open PDF →</button>
+    </div>`;
+  }).join('');
+
+  // Wire open buttons
+  logEl.querySelectorAll('.pdf-open-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      window.api.agentOpen(btn.dataset.path);
+    });
+  });
+}
+
+async function loadAgentPanel(agentKey) {
+  const logId = agentKey === 'stocks' ? 'stocks-pdf-log' : 'podcast-pdf-log';
+  document.getElementById(logId).innerHTML = '<span class="agent-empty">Loading…</span>';
+  try {
+    const reports = await window.api.agentReports(agentKey);
+    renderAgentReports(agentKey, reports);
+  } catch (err) {
+    document.getElementById(logId).innerHTML = `<span class="agent-empty" style="color:var(--red)">Error: ${err.message}</span>`;
+  }
+}
+
+async function runAgentAndNotify(agentKey) {
+  const runBtn  = document.getElementById(agentKey === 'stocks' ? 'stocks-run-btn'          : 'podcast-run-btn');
+  const badge   = document.getElementById(agentKey === 'stocks' ? 'stocks-running-badge'    : 'podcast-running-badge');
+  runBtn.disabled = true;
+  runBtn.textContent = 'Launching…';
+  badge.classList.add('visible');
+  try {
+    const result = await window.api.agentRun(agentKey);
+    if (result.error) {
+      alert(`Could not launch agent: ${result.error}`);
+      badge.classList.remove('visible');
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run Now';
+    } else {
+      // Badge stays visible until agent:ready fires
+      runBtn.textContent = 'Running…';
+    }
+  } catch (err) {
+    alert(`Launch error: ${err.message}`);
+    badge.classList.remove('visible');
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run Now';
+  }
+}
+
+// When the agent finishes and a new PDF is detected, refresh the log
+window.api.onAgentReady(({ key, reportName }) => {
+  const runBtn = document.getElementById(key === 'stocks' ? 'stocks-run-btn'       : 'podcast-run-btn');
+  const badge  = document.getElementById(key === 'stocks' ? 'stocks-running-badge' : 'podcast-running-badge');
+  if (runBtn)  { runBtn.disabled = false; runBtn.textContent = 'Run Now'; }
+  if (badge)   badge.classList.remove('visible');
+  // Reload the PDF list for whichever panel is affected
+  loadAgentPanel(key);
+});
+
+document.getElementById('stocks-run-btn').addEventListener('click',  () => runAgentAndNotify('stocks'));
+document.getElementById('podcast-run-btn').addEventListener('click', () => runAgentAndNotify('podcast'));
+
+// ── Paper Trail ───────────────────────────────────────────────────────────────
+function renderTrail(entries) {
+  const container = document.getElementById('trail-content');
+  if (!entries || !entries.length) {
+    container.innerHTML = '<span class="trail-empty">No activity yet. Mark items done in the Email Brief or create drafts via Chat.</span>';
+    return;
+  }
+
+  const now = new Date();
+  const todayStr   = now.toDateString();
+  const yesterdayStr = new Date(now - 86400000).toDateString();
+  const weekAgo    = new Date(now - 7 * 86400000);
+
+  function groupLabel(ts) {
+    const d = new Date(ts);
+    if (d.toDateString() === todayStr) return 'Today';
+    if (d.toDateString() === yesterdayStr) return 'Yesterday';
+    if (d > weekAgo) return 'This Week';
+    return 'Older';
+  }
+
+  const groups = {};
+  const groupOrder = ['Today', 'Yesterday', 'This Week', 'Older'];
+  for (const e of entries) {
+    const label = groupLabel(e.timestamp);
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(e);
+  }
+
+  const icon = { brief: '✅', draft: '✉️', calendar: '📅' };
+
+  let html = '';
+  for (const label of groupOrder) {
+    if (!groups[label]) continue;
+    html += `<div class="trail-date-group"><div class="trail-date-label">${label}</div>`;
+    for (const e of groups[label]) {
+      const t = new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const d = new Date(e.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const timeLabel = label === 'Today' ? t : `${d} · ${t}`;
+      html += `<div class="trail-entry">
+        <div class="trail-entry-icon">${icon[e.source] || '📌'}</div>
+        <div class="trail-entry-body">
+          <div class="trail-entry-text">${escapeHtml(e.text)}</div>
+          <div class="trail-entry-action">${escapeHtml(e.action)}</div>
+          <div class="trail-entry-time">${timeLabel}</div>
+        </div>
+        ${e.source === 'brief' ? `<button class="trail-restore-btn" data-trail-id="${e.id}">Restore</button>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+document.getElementById('trail-content').addEventListener('click', async e => {
+  const btn = e.target.closest('.trail-restore-btn');
+  if (!btn) return;
+  await window.api.trailRestore(Number(btn.dataset.trailId));
+  renderTrail(await window.api.trailGet());
+});
+
+window.api.onTrailUpdate(() => {
+  window.api.trailGet().then(renderTrail);
+});
+
+document.getElementById('run-digest-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('run-digest-btn');
+  btn.disabled = true; btn.textContent = 'Running…';
+  document.getElementById('digest-content').innerHTML = '<span class="empty">Fetching and analysing your inbox…</span>';
+  const result = await window.api.digestRun();
+  renderDigest(result);
+  btn.disabled = false; btn.textContent = 'Run Now';
+});
+window.api.onDigestNew(d => renderDigest(d));
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+async function loadCalendar() {
+  const btn = document.getElementById('refresh-cal-btn');
+  btn.disabled = true; btn.textContent = 'Loading…';
+  document.getElementById('cal-content').innerHTML = '<span class="cal-empty">Fetching from Calendar.app…</span>';
+  try {
+    const events = await window.api.calendarGet();
+    renderCalendar(events);
+  } catch(e) {
+    document.getElementById('cal-content').innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+  }
+  btn.disabled = false; btn.textContent = 'Refresh';
+}
+
+function renderCalendar(events) {
+  const container = document.getElementById('cal-content');
+  if (!events || !events.length) {
+    container.innerHTML = '<span class="cal-empty">No events in the next 7 days.</span>';
+    return;
+  }
+
+  const byDay = {};
+  for (const e of events) {
+    const d = e.date;
+    if (!byDay[d]) byDay[d] = [];
+    byDay[d].push(e);
+  }
+
+  const today = new Date().toDateString();
+  let html = '';
+  for (const [date, dayEvents] of Object.entries(byDay)) {
+    const d = new Date(date);
+    const isToday = d.toDateString() === today;
+    const label = isToday ? 'Today' : d.toLocaleDateString([], {weekday:'long', month:'short', day:'numeric'});
+    html += `<div class="cal-day">
+      <div class="cal-day-label ${isToday ? 'today' : ''}">${label}</div>`;
+    for (const ev of dayEvents) {
+      const color = stringToColor(ev.calendar || 'default');
+      html += `<div class="cal-event">
+        <div class="cal-dot" style="background:${color}"></div>
+        <div>
+          <div class="event-title">${escapeHtml(ev.title)}</div>
+          <div class="event-cal">${escapeHtml(ev.time)} · ${escapeHtml(ev.calendar || '')}</div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function stringToColor(str) {
+  const colors = ['#7b68ee','#4ecdc4','#e8a84c','#5cb85c','#e05c5c','#a78bfa','#38bdf8'];
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
+
+document.getElementById('refresh-cal-btn').addEventListener('click', loadCalendar);
+
+// ── Sender Rules ──────────────────────────────────────────────────────────────
+let starlist = [];
+let blocklist = [];
+
+function renderTags(type, items) {
+  if (type === 'star') starlist = [...items];
+  if (type === 'block') blocklist = [...items];
+  const container = document.getElementById(`${type}-list`);
+  container.innerHTML = '';
+  items.forEach((email, i) => {
+    const tag = document.createElement('div');
+    tag.className = `tag ${type}`;
+    tag.innerHTML = `${escapeHtml(email)}<button class="tag-remove" onclick="removeTag('${type}', ${i})">✕</button>`;
+    container.appendChild(tag);
+  });
+}
+
+function addTag(type) {
+  const input = document.getElementById(`${type}-input`);
+  const val = input.value.trim().toLowerCase();
+  if (!val || !val.includes('@')) return;
+  if (type === 'star' && !starlist.includes(val)) { starlist.push(val); renderTags('star', starlist); }
+  if (type === 'block' && !blocklist.includes(val)) { blocklist.push(val); renderTags('block', blocklist); }
+  input.value = '';
+}
+
+function removeTag(type, i) {
+  if (type === 'star') { starlist.splice(i, 1); renderTags('star', starlist); }
+  if (type === 'block') { blocklist.splice(i, 1); renderTags('block', blocklist); }
+}
+
+['star-input','block-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addTag(id.replace('-input','')); }
+  });
+});
+
+document.getElementById('save-contacts').addEventListener('click', async () => {
+  await window.api.configSave({ starlist, blocklist });
+  const ok = document.getElementById('save-contacts-ok');
+  ok.classList.add('show');
+  setTimeout(() => ok.classList.remove('show'), 2500);
+});
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `<div class="sender">${role === 'user' ? 'You' : 'Assistant'}</div>${escapeHtml(text)}`;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(t) {
+  if (!t) return '';
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+function showTyping() {
+  const div = document.createElement('div');
+  div.className = 'msg assistant'; div.id = 'typing';
+  div.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+function removeTyping() { const t = document.getElementById('typing'); if (t) t.remove(); }
+
+async function sendChat() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  chatInput.value = ''; chatInput.style.height = 'auto';
+  addMessage('user', msg); showTyping();
+  document.getElementById('chat-send').disabled = true;
+  try {
+    const reply = await window.api.chatSend(msg);
+    removeTyping(); addMessage('assistant', reply);
+  } catch(e) { removeTyping(); addMessage('assistant', 'Error: ' + e.message); }
+  document.getElementById('chat-send').disabled = false;
+}
+
+document.getElementById('chat-send').addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+chatInput.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
+
+// ── Draft toast ───────────────────────────────────────────────────────────────
+window.api.onDraftReady(data => {
+  document.getElementById('toast-body').textContent = `Draft to ${data.to} saved to Drafts. Review it before sending.`;
+  document.getElementById('draft-toast').classList.add('show');
+  setTimeout(() => document.getElementById('draft-toast').classList.remove('show'), 6000);
+});
+function hideDraftToast() { document.getElementById('draft-toast').classList.remove('show'); }
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+document.getElementById('save-settings').addEventListener('click', async () => {
+  const digestTimes = document.getElementById('cfg-times').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const signalsTime = document.getElementById('cfg-signals-time').value.trim() || '07:30';
+  await window.api.configSave({ digestTimes, signalsTime });
+  const ok = document.getElementById('save-ok');
+  ok.classList.add('show'); setTimeout(() => ok.classList.remove('show'), 2500);
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

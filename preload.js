@@ -1,0 +1,27 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  authStart:    ()      => ipcRenderer.invoke('auth:start'),
+  authStatus:   ()      => ipcRenderer.invoke('auth:status'),
+  configGet:    ()      => ipcRenderer.invoke('config:get'),
+  configSave:   (cfg)   => ipcRenderer.invoke('config:save', cfg),
+  digestRun:    ()      => ipcRenderer.invoke('digest:run'),
+  digestLast:   ()      => ipcRenderer.invoke('digest:last'),
+  chatSend:     (msg)   => ipcRenderer.invoke('chat:send', msg),
+  chatClear:    ()      => ipcRenderer.invoke('chat:clear'),
+  draftCreate:  (data)  => ipcRenderer.invoke('draft:create', data),
+  calendarGet:  ()      => ipcRenderer.invoke('calendar:get'),
+  calendarAdd:  (data)  => ipcRenderer.invoke('calendar:add', data),
+  onDigestNew:   (fn)    => ipcRenderer.on('digest:new',    (_, d) => fn(d)),
+  onDraftReady:  (fn)    => ipcRenderer.on('draft:ready',  (_, d) => fn(d)),
+  trailGet:      ()      => ipcRenderer.invoke('trail:get'),
+  trailAdd:      (entry) => ipcRenderer.invoke('trail:add', entry),
+  trailRestore:  (id)    => ipcRenderer.invoke('trail:restore', id),
+  onTrailUpdate: (fn)    => ipcRenderer.on('trail:update', (_, d) => fn(d)),
+  agentReports:  (key)        => ipcRenderer.invoke('agent:reports', key),
+  signalsGet:    ()           => ipcRenderer.invoke('signals:get'),
+  onSignalsNew:  (fn)         => ipcRenderer.on('signals:new', (_, d) => fn(d)),
+  agentOpen:     (filePath)   => ipcRenderer.invoke('agent:open', filePath),
+  agentRun:      (key)        => ipcRenderer.invoke('agent:run', key),
+  onAgentReady:  (fn)         => ipcRenderer.on('agent:ready', (_, d) => fn(d)),
+});

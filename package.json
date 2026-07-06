@@ -1,0 +1,26 @@
+{
+  "name": "exec-assistant",
+  "version": "1.0.0",
+  "description": "Private executive email assistant",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.exec.assistant",
+    "productName": "Executive Assistant",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg"
+    }
+  },
+  "allowScripts": {
+    "electron@30.5.1": true
+  }
+}
