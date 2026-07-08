@@ -1,0 +1,4 @@
+requests
+langgraph
+langchain-ollama
+fpdf2

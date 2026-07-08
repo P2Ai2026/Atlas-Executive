@@ -1,0 +1,6 @@
+requests
+feedparser
+langgraph
+langchain-ollama
+faster-whisper
+reportlab
