@@ -300,6 +300,10 @@
   .ev-show { font-weight: 600; min-width: 150px; }
   .ev-title { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ev-count { font-weight: 700; color: var(--accent2); }
+  [data-tip] { cursor: help; }
+  .signal-table th[data-tip] { text-decoration: underline dotted rgba(255,255,255,0.25); text-underline-offset: 3px; }
+  #hover-tip { position: fixed; z-index: 9999; max-width: 280px; background: #1c1c24; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; font-size: 12px; line-height: 1.55; color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; display: none; }
+  #hover-tip .tip-title { font-weight: 700; color: var(--accent2); display: block; margin-bottom: 2px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
 
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -570,6 +574,8 @@
 
   </div>
 </div>
+
+<div id="hover-tip"></div>
 
 <div id="draft-toast">
   <button class="toast-close" onclick="hideDraftToast()">✕</button>
@@ -857,6 +863,29 @@ function actionItem(ctx, emailId) {
 }
 
 // ── Signal Radar ──────────────────────────────────────────────────────────────
+
+// Plain-English definitions shown on hover. Title ¦ body.
+const RADAR_TIPS = {
+  'col-signal':   'Signal¦A term we count across every podcast transcript — watchlist topics (SMR, gas turbines, cooling…) plus companies/technologies the AI spots. Counts are exact, from the transcripts.',
+  'col-trend':    '8-week trend¦Weekly mention totals, oldest on the left, this week on the right (highlighted). Shape = trajectory: is this building or fading?',
+  'col-7day':     '7-day mentions¦Total times this term was said across all shows in the last 7 days.',
+  'col-base':     'Baseline / week¦Its average weekly mentions over the 3 weeks BEFORE this window — what "normal" looked like.',
+  'col-velocity': 'Velocity¦How much louder this week is than normal: 7-day mentions ÷ baseline. 5x = five times the usual chatter. "new" = no baseline yet, so a multiplier would be meaningless.',
+  'col-shows':    '# Shows (breadth)¦How many DIFFERENT podcasts said it this week. 1–2 shows = fringe. 4+ = consensus forming. Spreading breadth is how fringe becomes mainstream.',
+  'col-status':   'Status¦Where the term sits on the fringe→mainstream path, from velocity + breadth. Hover any badge for its meaning.',
+  'FRINGE RISING':    'Fringe Rising¦The early warning. Spiking hard (3x+ velocity, or brand-new and loud) but only 1–2 shows saying it. If it\'s real, it spreads — this is where being early pays.',
+  'NEW':              'New¦First time this term has ever appeared in our tracking. Not yet loud enough to call a fringe spike. Watch it.',
+  'EMERGING':         'Emerging¦Rising (1.5x+ velocity) AND spreading to 3 shows. The fringe idea is catching on.',
+  'GOING MAINSTREAM': 'Going Mainstream¦Accelerating AND broad (4+ shows). The fringe→mainstream move is happening right now — decide fast.',
+  'MAINSTREAM':       'Mainstream¦Everyone is saying it and it\'s no longer accelerating. Consensus — you\'re late to be early, but confirm exposure.',
+  'RISING':           'Rising¦Mentions accelerating (1.5x+) but not yet spreading across shows.',
+  'STEADY':           'Steady¦Present in the conversation at its normal level. Background, not a mover.',
+};
+
+function tipAttr(key) {
+  return RADAR_TIPS[key] ? ` data-tip="${escAttr(RADAR_TIPS[key])}"` : '';
+}
+
 function renderSignals(data) {
   const sigEl   = document.getElementById('radar-signals');
   const briefEl = document.getElementById('radar-brief');
@@ -890,7 +919,7 @@ function renderSignals(data) {
         <td class="signal-delta">${s.baseline_weekly}</td>
         <td>${vel}</td>
         <td class="signal-delta">${s.breadth}</td>
-        <td><span class="sig-badge ${cls}">${escapeHtml(s.status)}</span></td>
+        <td><span class="sig-badge ${cls}"${tipAttr(s.status)}>${escapeHtml(s.status)}</span></td>
         <td><button class="signal-mute" data-term="${termAttr}" title="Mute — not a real signal">✕</button></td>
       </tr>
       <tr class="evidence-row" data-evidence="${termAttr}" style="display:none">
@@ -898,7 +927,16 @@ function renderSignals(data) {
       </tr>`;
     }).join('');
     sigEl.innerHTML = `<table class="signal-table">
-      <thead><tr><th>Signal</th><th>8-wk trend</th><th>7-day</th><th>Base/wk</th><th>Velocity</th><th># Shows</th><th>Status</th><th></th></tr></thead>
+      <thead><tr>
+        <th${tipAttr('col-signal')}>Signal</th>
+        <th${tipAttr('col-trend')}>8-wk trend</th>
+        <th${tipAttr('col-7day')}>7-day</th>
+        <th${tipAttr('col-base')}>Base/wk</th>
+        <th${tipAttr('col-velocity')}>Velocity</th>
+        <th${tipAttr('col-shows')}># Shows</th>
+        <th${tipAttr('col-status')}>Status</th>
+        <th></th>
+      </tr></thead>
       <tbody>${rows}</tbody></table>`;
     loadSparklines(shown.map(s => s.term));
   } else {
@@ -957,6 +995,30 @@ async function loadSparklines(terms) {
     }
   } catch {}
 }
+
+// Hover tooltips — any element with data-tip="Title¦body" gets a floating
+// definition card. One shared div, positioned next to the element, clamped
+// to the window so it never gets cut off.
+const hoverTip = document.getElementById('hover-tip');
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) return;
+  const [title, body] = el.dataset.tip.split('¦');
+  hoverTip.innerHTML = (body ? `<span class="tip-title">${escapeHtml(title)}</span>${escapeHtml(body)}`
+                             : escapeHtml(title));
+  hoverTip.style.display = 'block';
+  const r = el.getBoundingClientRect();
+  const tw = hoverTip.offsetWidth, th = hoverTip.offsetHeight;
+  let x = r.left + r.width / 2 - tw / 2;
+  x = Math.max(8, Math.min(x, window.innerWidth - tw - 8));
+  let y = r.bottom + 8;
+  if (y + th > window.innerHeight - 8) y = r.top - th - 8;   // flip above if no room
+  hoverTip.style.left = x + 'px';
+  hoverTip.style.top  = y + 'px';
+});
+document.addEventListener('mouseout', e => {
+  if (e.target.closest('[data-tip]')) hoverTip.style.display = 'none';
+});
 
 // Row click → toggle the evidence panel (which episodes said it, when, how often)
 document.getElementById('radar-signals').addEventListener('click', async e => {
