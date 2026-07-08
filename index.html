@@ -899,7 +899,10 @@ async function markDone(idx) {
   doneItems[idx] = true;
   const el = document.querySelector(`.brief-item[data-item-idx="${idx}"]`);
   if (el) el.classList.add('done');
-  await window.api.trailAdd({ text: ctx, action: 'Marked complete', source: 'brief' });
+  // Include the matched email ID so future digests can SKIP this email —
+  // without it, "done" items resurface on every fresh run.
+  const emailId = briefEmailIds[idx] || null;
+  await window.api.trailAdd({ text: ctx, action: 'Marked complete', source: 'brief', emailId });
   renderTrail(await window.api.trailGet());
 }
 
