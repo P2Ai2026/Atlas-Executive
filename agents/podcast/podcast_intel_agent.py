@@ -174,6 +174,7 @@ OUTPUT_DIR   = os.environ.get("PODCAST_OUTPUT_DIR") \
 CACHE_DIR    = os.path.join(OUTPUT_DIR, ".transcript_cache")
 HISTORY_FILE = os.path.join(OUTPUT_DIR, "signal_history.json")
 SIGNALS_FILE = os.path.join(OUTPUT_DIR, "signals_latest.json")
+FEEDS_FILE   = os.path.join(OUTPUT_DIR, "feeds_cache.json")   # pinned RSS URLs
 
 
 # =====================================================================
@@ -613,13 +614,32 @@ class PodState(TypedDict):
 # NODES
 # =====================================================================
 
+def load_feed_cache() -> dict:
+    try:
+        with open(FEEDS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def fetch_node(state):
     print("[fetch]      finding new episodes (daily window)...")
     history = load_history()
     seen = {e["id"] for e in history["episodes"]}
+    # Pin resolved RSS URLs: look each show up ONCE, then reuse the cached URL
+    # every day after — faster, and immune to the lookup grabbing a clone feed.
+    # To force a re-lookup (e.g. a show moves hosts), delete its line from
+    # feeds_cache.json in the output folder.
+    feed_cache = load_feed_cache()
+    cache_dirty = False
     episodes, bible = [], None
     for pod in PODCASTS:
-        feed = pod["feed"] or itunes_lookup(pod["name"])
+        feed = pod["feed"] or feed_cache.get(pod["name"])
+        if not feed:
+            feed = itunes_lookup(pod["name"])
+            if feed:
+                feed_cache[pod["name"]] = feed
+                cache_dirty = True
         if not feed:
             print(f"             - {pod['name']}: no feed found, skipping")
             continue
@@ -637,6 +657,10 @@ def fetch_node(state):
             else:
                 episodes.append(ep)
         time.sleep(0.2)
+    if cache_dirty:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(FEEDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(feed_cache, f, indent=1)
     return {"episodes": episodes, "bible": bible}
 
 

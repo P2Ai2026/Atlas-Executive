@@ -6,7 +6,8 @@ const { getMail, deleteMail, deleteMailBySenderName, createDraft, getCalendarSlo
 const { summarizeMail, chat } = require('./src/ai');
 const { loadConfig, saveConfig } = require('./src/config');
 const scheduler = require('./src/scheduler');
-const { getAgentReports, getAgentHighlights, getSignals, runAgent, AGENT_CONFIG } = require('./src/agents');
+const { getAgentReports, getAgentHighlights, getSignals, getTermSeries,
+        getTermEvidence, muteTerm, runAgent, AGENT_CONFIG } = require('./src/agents');
 
 let win;
 let conversationHistory = [];
@@ -219,6 +220,9 @@ ipcMain.handle('calendar:add', async (_, { event, date, time, calendar }) => {
 ipcMain.handle('agent:reports', (_, key) => getAgentReports(key));
 
 ipcMain.handle('signals:get', () => getSignals());
+ipcMain.handle('signals:series',   (_, terms) => getTermSeries(terms || []));
+ipcMain.handle('signals:evidence', (_, term)  => getTermEvidence(term));
+ipcMain.handle('signals:mute',     (_, term)  => muteTerm(term));
 
 ipcMain.handle('agent:open', (_, filePath) => {
   shell.openPath(filePath);
@@ -375,6 +379,18 @@ async function runDigest() {
       const highlights = await getAgentHighlights();
       if (highlights.length) {
         fullDigest += `\n\n**🤖 Agent Updates**\n${highlights.join('\n')}`;
+      }
+    } catch {}
+
+    // Append Signal Radar top movers — deterministic, straight from the JSON
+    try {
+      const sig = getSignals();
+      if (sig?.signals?.length) {
+        const top = sig.signals.slice(0, 3).map(s => {
+          const vel = s.velocity != null ? `, ${s.velocity}x` : '';
+          return `${s.term} — ${s.status}${vel}, ${s.breadth} show${s.breadth !== 1 ? 's' : ''}`;
+        }).join('\n- ');
+        fullDigest += `\n\n**📡 Signal Radar — Top Movers**\n- ${top}\n→ Details in the Signal Radar tab.`;
       }
     } catch {}
 

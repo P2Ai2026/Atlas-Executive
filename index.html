@@ -285,6 +285,21 @@
   .radar-chip { font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); color: var(--text); background: rgba(255,255,255,0.03); }
   .radar-chip .rel { font-weight: 700; margin-right: 5px; }
   .radar-empty { color: var(--muted); font-style: italic; font-size: 13px; padding: 20px 0; }
+  .signal-row { cursor: pointer; }
+  .signal-row:hover td { background: rgba(255,255,255,0.025); }
+  .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 24px; min-width: 66px; }
+  .spark-bar { width: 6px; background: rgba(123,104,238,0.45); border-radius: 1px 1px 0 0; display: inline-block; }
+  .spark-bar.cur { background: var(--accent); }
+  .signal-mute { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; opacity: 0; transition: opacity 0.15s; }
+  .signal-row:hover .signal-mute { opacity: 0.7; }
+  .signal-mute:hover { opacity: 1 !important; color: var(--red); background: rgba(224,92,92,0.12); }
+  .evidence-box { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 2px 0 8px; font-size: 12px; }
+  .evidence-line { display: flex; gap: 12px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: baseline; }
+  .evidence-line:last-child { border-bottom: none; }
+  .ev-date { color: var(--muted); min-width: 76px; font-variant-numeric: tabular-nums; }
+  .ev-show { font-weight: 600; min-width: 150px; }
+  .ev-title { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-count { font-weight: 700; color: var(--accent2); }
 
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -856,28 +871,36 @@ function renderSignals(data) {
   const gen = new Date(data.generated);
   genEl.textContent = `Last scan: ${gen.toLocaleDateString()} at ${gen.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · ${data.window_days}-day window vs ${data.baseline_days}-day baseline`;
 
-  // Top movers table
+  // Top movers table — each row expands to show evidence; ✕ mutes the term
   if (data.signals && data.signals.length) {
-    const rows = data.signals.slice(0, 15).map(s => {
+    const shown = data.signals.slice(0, 15);
+    const rows = shown.map(s => {
       const cls = 'sig-' + s.status.replace(/\s+/g, '-');
       const vel = s.velocity == null
         ? `<span class="signal-delta" style="color:var(--muted)">new</span>`
         : s.velocity >= 1.5
           ? `<span class="signal-delta up">▲ ${s.velocity}x</span>`
           : `<span class="signal-delta">${s.velocity}x</span>`;
-      return `<tr>
+      const termAttr = escAttr(s.term);
+      return `<tr class="signal-row" data-term="${termAttr}" title="Click for evidence">
         <td><div class="signal-term">${escapeHtml(s.term)}</div>
             <div class="signal-shows">${escapeHtml((s.shows || []).join(' · '))}</div></td>
+        <td><div class="sparkline" data-spark="${termAttr}"></div></td>
         <td class="signal-delta">${s.current}</td>
         <td class="signal-delta">${s.baseline_weekly}</td>
         <td>${vel}</td>
         <td class="signal-delta">${s.breadth}</td>
         <td><span class="sig-badge ${cls}">${escapeHtml(s.status)}</span></td>
+        <td><button class="signal-mute" data-term="${termAttr}" title="Mute — not a real signal">✕</button></td>
+      </tr>
+      <tr class="evidence-row" data-evidence="${termAttr}" style="display:none">
+        <td colspan="8"><div class="evidence-box">Loading…</div></td>
       </tr>`;
     }).join('');
     sigEl.innerHTML = `<table class="signal-table">
-      <thead><tr><th>Signal</th><th>7-day</th><th>Base/wk</th><th>Velocity</th><th># Shows</th><th>Status</th></tr></thead>
+      <thead><tr><th>Signal</th><th>8-wk trend</th><th>7-day</th><th>Base/wk</th><th>Velocity</th><th># Shows</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table>`;
+    loadSparklines(shown.map(s => s.term));
   } else {
     sigEl.innerHTML = '<span class="radar-empty">No active signals in the current window.</span>';
   }
@@ -915,6 +938,60 @@ async function loadSignals() {
       `<span class="radar-empty" style="color:var(--red)">Error: ${escapeHtml(err.message)}</span>`;
   }
 }
+
+// Fetch weekly counts for all visible terms in one IPC call, then draw
+// mini bar charts. Bars scale to each term's own max.
+async function loadSparklines(terms) {
+  try {
+    const series = await window.api.signalsSeries(terms);
+    for (const term of terms) {
+      const el = document.querySelector(`.sparkline[data-spark="${CSS.escape(term)}"]`);
+      const weeks = series[term];
+      if (!el || !weeks) continue;
+      const max = Math.max(...weeks, 1);
+      el.innerHTML = weeks.map((n, i) => {
+        const h = n === 0 ? 2 : Math.max(3, Math.round((n / max) * 22));
+        const cur = i === weeks.length - 1 ? ' cur' : '';
+        return `<span class="spark-bar${cur}" style="height:${h}px" title="${n} mentions"></span>`;
+      }).join('');
+    }
+  } catch {}
+}
+
+// Row click → toggle the evidence panel (which episodes said it, when, how often)
+document.getElementById('radar-signals').addEventListener('click', async e => {
+  const muteBtn = e.target.closest('.signal-mute');
+  if (muteBtn) {
+    e.stopPropagation();
+    const term = muteBtn.dataset.term;
+    if (!confirm(`Mute "${term}"? It disappears from the radar and future scans ignore it.\n(Undo: edit term_verdicts in signal_history.json)`)) return;
+    renderSignals(await window.api.signalsMute(term));
+    return;
+  }
+  const row = e.target.closest('.signal-row');
+  if (!row) return;
+  const term = row.dataset.term;
+  const evRow = document.querySelector(`.evidence-row[data-evidence="${CSS.escape(term)}"]`);
+  if (!evRow) return;
+  const isOpen = evRow.style.display !== 'none';
+  document.querySelectorAll('.evidence-row').forEach(r => r.style.display = 'none');
+  if (isOpen) return;
+  evRow.style.display = '';
+  const box = evRow.querySelector('.evidence-box');
+  box.textContent = 'Loading…';
+  try {
+    const ev = await window.api.signalsEvidence(term);
+    if (!ev.episodes.length) { box.textContent = 'No episode records for this term.'; return; }
+    box.innerHTML = ev.episodes.map(ep =>
+      `<div class="evidence-line"><span class="ev-date">${escapeHtml(ep.date)}</span>
+       <span class="ev-show">${escapeHtml(ep.podcast)}</span>
+       <span class="ev-title">${escapeHtml(ep.title)}</span>
+       <span class="ev-count">${ep.count}×</span></div>`
+    ).join('');
+  } catch (err) {
+    box.textContent = 'Error: ' + err.message;
+  }
+});
 
 document.getElementById('radar-run-btn').addEventListener('click', async () => {
   const btn = document.getElementById('radar-run-btn');

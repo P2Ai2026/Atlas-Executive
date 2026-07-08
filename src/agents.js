@@ -140,6 +140,62 @@ function getSignals() {
   }
 }
 
+const HISTORY_FILE = path.join(AGENT_CONFIG.podcast.outputDir, 'signal_history.json');
+
+function getSignalHistory() {
+  try {
+    return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Weekly mention counts for a set of terms over the trailing N weeks — the
+// data behind the sparklines. One pass over history for all terms at once.
+function getTermSeries(terms, weeks = 8) {
+  const hist = getSignalHistory();
+  const out = {};
+  for (const t of terms) out[t] = Array(weeks).fill(0);
+  if (!hist) return out;
+  const now = Date.now();
+  const WEEK = 7 * 86400000;
+  for (const e of hist.episodes || []) {
+    const age = now - new Date(e.date + 'T12:00:00').getTime();
+    const bucket = Math.floor(age / WEEK);           // 0 = current week
+    if (bucket < 0 || bucket >= weeks) continue;
+    for (const t of terms) {
+      if (e.terms && e.terms[t]) out[t][weeks - 1 - bucket] += e.terms[t];
+    }
+  }
+  return out; // arrays run oldest → newest
+}
+
+// Every episode that mentioned a term — the receipts behind a signal.
+function getTermEvidence(term) {
+  const hist = getSignalHistory();
+  if (!hist) return { term, episodes: [] };
+  const episodes = (hist.episodes || [])
+    .filter(e => e.terms && e.terms[term])
+    .map(e => ({ date: e.date, podcast: e.podcast, title: e.title, count: e.terms[term] }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  return { term, episodes: episodes.slice(0, 25) };
+}
+
+// Mute a term: mark it "drop" in term_verdicts (the agent respects this on
+// every future run) and strip it from the current signals JSON immediately.
+function muteTerm(term) {
+  const hist = getSignalHistory() || { episodes: [] };
+  hist.term_verdicts = hist.term_verdicts || {};
+  hist.term_verdicts[term] = 'drop';
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(hist, null, 1));
+  const sig = getSignals();
+  if (sig && sig.signals) {
+    sig.signals = sig.signals.filter(s => s.term !== term);
+    fs.writeFileSync(AGENT_CONFIG.podcast.signalsFile, JSON.stringify(sig, null, 1));
+  }
+  return getSignals();
+}
+
 // ── Agent runner with file-watcher notification ───────────────────────────────
 
 // One in-flight run per agent — clicking Run Now twice must not spawn two
@@ -236,4 +292,5 @@ function runAgent(agentKey, onReady) {
   return { started: true, pid: child.pid, script: scriptPath };
 }
 
-module.exports = { getAgentReports, getAgentHighlights, getSignals, runAgent, AGENT_CONFIG };
+module.exports = { getAgentReports, getAgentHighlights, getSignals, getTermSeries,
+                   getTermEvidence, muteTerm, runAgent, AGENT_CONFIG };
