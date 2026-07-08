@@ -1,0 +1,34 @@
+Weekly Internship Meeting
+June 25, 2026
+
+Attendees:
+Trip
+John
+
+Agenda:
+- Discuss AI Meeting Memory Agent
+- Review progress on Podcast Agent
+- Plan next development steps
+
+Discussion:
+
+We agreed that the Meeting Memory Agent should be able to listen to meetings, classes, and lectures. It should automatically create a summary, identify action items, record important decisions, and list unanswered questions.
+
+Trip will build the first version of the Meeting Memory Agent.
+
+John will research the best speech-to-text models, including Whisper.
+
+The team wants all reports to be automatically saved inside the meeting_reports folder.
+
+Decision:
+Build the offline version first before adding cloud AI features.
+
+Action Items:
+- Trip: Finish Meeting Memory Agent prototype.
+- John: Research Whisper and compare it with other speech-to-text models.
+- Both: Meet next week to review progress.
+
+Unanswered Questions:
+- Should we use Whisper or another speech recognition model?
+- Should reports be saved as PDF or TXT?
+- How can we support very long meetings?

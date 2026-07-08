@@ -1,0 +1,1 @@
+ This is a test meeting. We discussed building the meeting memory agent. My action item is to finish the prototype. General Research Whisperer we decided to build the offline version first. One unanswered question is whether we should export reports as PDFs.
