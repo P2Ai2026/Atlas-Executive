@@ -18,6 +18,11 @@ anything without you.
 - **Calendar** — next 7 days from Apple Calendar.
 - **Sender Rules** — priority senders (always top of brief) and auto-delete.
 - **The Paper Trail** — log of completed items, drafts, and calendar adds.
+- **Library** — drop in documents (txt/md/pdf) for structured AI summaries,
+  exact-phrase search, and "Ask the Library": grounded Q&A that answers only
+  from your documents and cites which files it used. Docs live in
+  `~/Desktop/Atlas Library/`. (Concepts adapted from the AI Operations Hub's
+  summarizer/memory modules.)
 
 **Agents**
 - **📡 Signal Radar** — the daily fringe→mainstream scan across 16 podcasts.
