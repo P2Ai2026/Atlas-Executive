@@ -27,4 +27,11 @@ contextBridge.exposeInMainWorld('api', {
   agentOpen:     (filePath)   => ipcRenderer.invoke('agent:open', filePath),
   agentRun:      (key)        => ipcRenderer.invoke('agent:run', key),
   onAgentReady:  (fn)         => ipcRenderer.on('agent:ready', (_, d) => fn(d)),
+  libraryList:      ()        => ipcRenderer.invoke('library:list'),
+  libraryImport:    ()        => ipcRenderer.invoke('library:import-dialog'),
+  libraryImportPaths: (paths) => ipcRenderer.invoke('library:import-paths', paths),
+  librarySummarize: (name)    => ipcRenderer.invoke('library:summarize', name),
+  librarySearch:    (term)    => ipcRenderer.invoke('library:search', term),
+  libraryAsk:       (q)       => ipcRenderer.invoke('library:ask', q),
+  libraryReveal:    ()        => ipcRenderer.invoke('library:reveal'),
 });

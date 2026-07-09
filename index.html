@@ -300,6 +300,30 @@
   .ev-show { font-weight: 600; min-width: 150px; }
   .ev-title { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ev-count { font-weight: 700; color: var(--accent2); }
+  /* ── Library ── */
+  .lib-ask-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .lib-ask-row input { flex: 1; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 13px; outline: none; }
+  .lib-ask-row input:focus { border-color: var(--accent); }
+  .lib-ask-row button { padding: 10px 18px; background: var(--accent); border: none; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .lib-ask-row button:disabled { opacity: 0.5; }
+  #lib-answer .radar-brief, #lib-search-results .radar-brief { margin-top: 4px; }
+  .lib-doc { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 9px; margin-bottom: 8px; background: rgba(255,255,255,0.015); }
+  .lib-doc-icon { font-size: 18px; }
+  .lib-doc-body { flex: 1; min-width: 0; }
+  .lib-doc-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib-doc-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .lib-doc-btn { padding: 6px 13px; border-radius: 7px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .lib-doc-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .lib-doc-btn:disabled { opacity: 0.5; cursor: wait; }
+  .lib-summary { display: none; padding: 12px 16px; border: 1px solid var(--border); border-top: none; border-radius: 0 0 9px 9px; margin: -9px 0 8px; background: rgba(255,255,255,0.02); font-size: 12.5px; line-height: 1.7; }
+  .lib-summary h4 { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent2); margin: 10px 0 4px; }
+  .lib-summary h4:first-child { margin-top: 0; }
+  .lib-drop-active { outline: 2px dashed var(--accent); outline-offset: -8px; }
+
+  [data-tip] { cursor: help; }
+  .signal-table th[data-tip] { text-decoration: underline dotted rgba(255,255,255,0.25); text-underline-offset: 3px; }
+  #hover-tip { position: fixed; z-index: 9999; max-width: 280px; background: #1c1c24; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; font-size: 12px; line-height: 1.55; color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; display: none; }
+  #hover-tip .tip-title { font-weight: 700; color: var(--accent2); display: block; margin-bottom: 2px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
 
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -322,6 +346,7 @@
       <button class="nav-item" data-panel="calendar"><span class="icon">📅</span> Calendar</button>
       <button class="nav-item" data-panel="contacts"><span class="icon">👥</span> Sender Rules</button>
       <button class="nav-item" data-panel="trail"><span class="icon">🗂️</span> The Paper Trail</button>
+      <button class="nav-item" data-panel="library"><span class="icon">📚</span> Library</button>
     </div>
     <div class="nav-section">
       <div class="nav-label">Agents</div>
@@ -462,6 +487,37 @@
       <span class="save-ok" id="save-profile-ok">✓ Saved</span>
     </div>
 
+    <!-- Library -->
+    <div id="panel-library" class="panel agent-panel">
+      <div class="agent-header">
+        <div>
+          <h2>📚 Library</h2>
+          <div class="meta">Drop in documents · AI summaries · ask questions across everything · all local</div>
+        </div>
+        <div class="agent-header-btns">
+          <button class="agent-run-btn" id="lib-add-btn">+ Add Documents</button>
+          <button class="agent-run-btn" id="lib-reveal-btn" style="background:rgba(255,255,255,0.08)">Open Folder</button>
+        </div>
+      </div>
+
+      <div class="agent-section-label">Ask the Library</div>
+      <div class="lib-ask-row">
+        <input type="text" id="lib-ask-input" placeholder="Ask a question — answers come only from your documents, with sources…">
+        <button id="lib-ask-btn">Ask</button>
+      </div>
+      <div id="lib-answer"></div>
+
+      <div class="agent-section-label">Search</div>
+      <div class="lib-ask-row">
+        <input type="text" id="lib-search-input" placeholder="Find an exact word or phrase across all documents…">
+        <button id="lib-search-btn">Search</button>
+      </div>
+      <div id="lib-search-results"></div>
+
+      <div class="agent-section-label">Documents</div>
+      <div id="lib-docs"><span class="radar-empty">No documents yet. Click + Add Documents or drop files here (txt, md, pdf).</span></div>
+    </div>
+
     <!-- Signal Radar -->
     <div id="panel-signals" class="panel agent-panel">
       <div class="agent-header">
@@ -571,6 +627,8 @@
   </div>
 </div>
 
+<div id="hover-tip"></div>
+
 <div id="draft-toast">
   <button class="toast-close" onclick="hideDraftToast()">✕</button>
   <div class="toast-title">✉️ Draft ready in Mail</div>
@@ -587,6 +645,7 @@ document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
     document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
     if (btn.dataset.panel === 'calendar') loadCalendar();
     if (btn.dataset.panel === 'signals')  loadSignals();
+    if (btn.dataset.panel === 'library')  loadLibrary();
     if (btn.dataset.panel === 'agent-stocks')  loadAgentPanel('stocks');
     if (btn.dataset.panel === 'agent-podcast') loadAgentPanel('podcast');
   });
@@ -600,6 +659,7 @@ function navigateTo(panelName) {
   const panel = document.getElementById('panel-' + panelName);
   if (panel) panel.classList.add('active');
   if (panelName === 'signals')       loadSignals();
+  if (panelName === 'library')       loadLibrary();
   if (panelName === 'agent-stocks')  loadAgentPanel('stocks');
   if (panelName === 'agent-podcast') loadAgentPanel('podcast');
 }
@@ -839,7 +899,10 @@ async function markDone(idx) {
   doneItems[idx] = true;
   const el = document.querySelector(`.brief-item[data-item-idx="${idx}"]`);
   if (el) el.classList.add('done');
-  await window.api.trailAdd({ text: ctx, action: 'Marked complete', source: 'brief' });
+  // Include the matched email ID so future digests can SKIP this email —
+  // without it, "done" items resurface on every fresh run.
+  const emailId = briefEmailIds[idx] || null;
+  await window.api.trailAdd({ text: ctx, action: 'Marked complete', source: 'brief', emailId });
   renderTrail(await window.api.trailGet());
 }
 
@@ -856,7 +919,157 @@ function actionItem(ctx, emailId) {
   input.setSelectionRange(len, len);
 }
 
+// ── Library ───────────────────────────────────────────────────────────────────
+
+// Render summary text with the same section-header treatment as the radar brief
+function libMdToHtml(text) {
+  return (text || '').split('\n').map(line => {
+    const l = escapeHtml(line.trim());
+    if (!l) return '';
+    const hdr = l.match(/^\**([A-Z][A-Z &\-/']{2,}):\**\s*(.*)$/);
+    if (hdr) return `<h4>${hdr[1]}</h4>${hdr[2] ? `<div>${hdr[2]}</div>` : ''}`;
+    return `<div>${l.replace(/^[\*\-•]\s+/, '• ')}</div>`;
+  }).join('');
+}
+
+function renderLibDocs(docs) {
+  const el = document.getElementById('lib-docs');
+  if (!docs || !docs.length) {
+    el.innerHTML = '<span class="radar-empty">No documents yet. Click + Add Documents or drop files here (txt, md, pdf).</span>';
+    return;
+  }
+  el.innerHTML = docs.map(d => {
+    const icon = d.name.toLowerCase().endsWith('.pdf') ? '📄' : '📝';
+    const date = new Date(d.mtime).toLocaleDateString();
+    const sumBtn = d.hasSummary
+      ? `<button class="lib-doc-btn" data-view="${escAttr(d.name)}">View Summary</button>`
+      : `<button class="lib-doc-btn primary" data-summarize="${escAttr(d.name)}">Summarize</button>`;
+    const summaryDiv = d.hasSummary
+      ? `<div class="lib-summary" data-summary-for="${escAttr(d.name)}">${libMdToHtml(d.summary)}</div>`
+      : `<div class="lib-summary" data-summary-for="${escAttr(d.name)}"></div>`;
+    return `<div class="lib-doc" data-doc="${escAttr(d.name)}">
+      <span class="lib-doc-icon">${icon}</span>
+      <div class="lib-doc-body">
+        <div class="lib-doc-name">${escapeHtml(d.name)}</div>
+        <div class="lib-doc-meta">${date} · ${d.sizeKb} KB${d.hasSummary ? ' · summarized' : ''}</div>
+      </div>
+      ${sumBtn}
+    </div>${summaryDiv}`;
+  }).join('');
+}
+
+async function loadLibrary() {
+  try { renderLibDocs(await window.api.libraryList()); } catch (e) {
+    document.getElementById('lib-docs').innerHTML = `<span class="radar-empty" style="color:var(--red)">Error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+document.getElementById('lib-add-btn').addEventListener('click', async () => {
+  const res = await window.api.libraryImport();
+  renderLibDocs(res.docs);
+});
+document.getElementById('lib-reveal-btn').addEventListener('click', () => window.api.libraryReveal());
+
+// Summarize / view-summary buttons
+document.getElementById('lib-docs').addEventListener('click', async e => {
+  const sumBtn = e.target.closest('[data-summarize]');
+  const viewBtn = e.target.closest('[data-view]');
+  if (sumBtn) {
+    const name = sumBtn.dataset.summarize;
+    sumBtn.disabled = true; sumBtn.textContent = 'Summarizing…';
+    try {
+      const result = await window.api.librarySummarize(name);
+      const box = document.querySelector(`.lib-summary[data-summary-for="${CSS.escape(name)}"]`);
+      if (box) { box.innerHTML = libMdToHtml(result.summary); box.style.display = 'block'; }
+      sumBtn.textContent = 'View Summary';
+      sumBtn.disabled = false;
+      sumBtn.classList.remove('primary');
+      sumBtn.removeAttribute('data-summarize');
+      sumBtn.setAttribute('data-view', name);
+    } catch (err) {
+      alert('Summarize failed: ' + err.message);
+      sumBtn.disabled = false; sumBtn.textContent = 'Summarize';
+    }
+    return;
+  }
+  if (viewBtn) {
+    const box = document.querySelector(`.lib-summary[data-summary-for="${CSS.escape(viewBtn.dataset.view)}"]`);
+    if (box) box.style.display = box.style.display === 'block' ? 'none' : 'block';
+  }
+});
+
+// Ask the Library
+async function libAsk() {
+  const input = document.getElementById('lib-ask-input');
+  const btn = document.getElementById('lib-ask-btn');
+  const out = document.getElementById('lib-answer');
+  const q = input.value.trim();
+  if (!q) return;
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  out.innerHTML = '<span class="radar-empty">Reading the library…</span>';
+  try {
+    const answer = await window.api.libraryAsk(q);
+    out.innerHTML = `<div class="radar-brief">${libMdToHtml(answer)}</div>`;
+  } catch (err) {
+    out.innerHTML = `<span class="radar-empty" style="color:var(--red)">Error: ${escapeHtml(err.message)}</span>`;
+  }
+  btn.disabled = false; btn.textContent = 'Ask';
+}
+document.getElementById('lib-ask-btn').addEventListener('click', libAsk);
+document.getElementById('lib-ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') libAsk(); });
+
+// Search
+async function libSearch() {
+  const q = document.getElementById('lib-search-input').value.trim();
+  const out = document.getElementById('lib-search-results');
+  if (!q) { out.innerHTML = ''; return; }
+  out.innerHTML = '<span class="radar-empty">Searching…</span>';
+  const hits = await window.api.librarySearch(q);
+  if (!hits.length) { out.innerHTML = '<span class="radar-empty">No matches.</span>'; return; }
+  out.innerHTML = `<div class="radar-brief">` + hits.map(h =>
+    `<div><strong>${escapeHtml(h.name)}</strong> — …${escapeHtml(h.snippet)}…</div>`
+  ).join('') + `</div>`;
+}
+document.getElementById('lib-search-btn').addEventListener('click', libSearch);
+document.getElementById('lib-search-input').addEventListener('keydown', e => { if (e.key === 'Enter') libSearch(); });
+
+// Drag & drop files onto the Library panel
+const libPanel = document.getElementById('panel-library');
+libPanel.addEventListener('dragover', e => { e.preventDefault(); libPanel.classList.add('lib-drop-active'); });
+libPanel.addEventListener('dragleave', () => libPanel.classList.remove('lib-drop-active'));
+libPanel.addEventListener('drop', async e => {
+  e.preventDefault();
+  libPanel.classList.remove('lib-drop-active');
+  const paths = [...e.dataTransfer.files].map(f => f.path).filter(Boolean);
+  if (!paths.length) return;
+  const res = await window.api.libraryImportPaths(paths);
+  renderLibDocs(res.docs);
+});
+
 // ── Signal Radar ──────────────────────────────────────────────────────────────
+
+// Plain-English definitions shown on hover. Title ¦ body.
+const RADAR_TIPS = {
+  'col-signal':   'Signal¦A term we count across every podcast transcript — watchlist topics (SMR, gas turbines, cooling…) plus companies/technologies the AI spots. Counts are exact, from the transcripts.',
+  'col-trend':    '8-week trend¦Weekly mention totals, oldest on the left, this week on the right (highlighted). Shape = trajectory: is this building or fading?',
+  'col-7day':     '7-day mentions¦Total times this term was said across all shows in the last 7 days.',
+  'col-base':     'Baseline / week¦Its average weekly mentions over the 3 weeks BEFORE this window — what "normal" looked like.',
+  'col-velocity': 'Velocity¦How much louder this week is than normal: 7-day mentions ÷ baseline. 5x = five times the usual chatter. "new" = no baseline yet, so a multiplier would be meaningless.',
+  'col-shows':    '# Shows (breadth)¦How many DIFFERENT podcasts said it this week. 1–2 shows = fringe. 4+ = consensus forming. Spreading breadth is how fringe becomes mainstream.',
+  'col-status':   'Status¦Where the term sits on the fringe→mainstream path, from velocity + breadth. Hover any badge for its meaning.',
+  'FRINGE RISING':    'Fringe Rising¦The early warning. Spiking hard (3x+ velocity, or brand-new and loud) but only 1–2 shows saying it. If it\'s real, it spreads — this is where being early pays.',
+  'NEW':              'New¦First time this term has ever appeared in our tracking. Not yet loud enough to call a fringe spike. Watch it.',
+  'EMERGING':         'Emerging¦Rising (1.5x+ velocity) AND spreading to 3 shows. The fringe idea is catching on.',
+  'GOING MAINSTREAM': 'Going Mainstream¦Accelerating AND broad (4+ shows). The fringe→mainstream move is happening right now — decide fast.',
+  'MAINSTREAM':       'Mainstream¦Everyone is saying it and it\'s no longer accelerating. Consensus — you\'re late to be early, but confirm exposure.',
+  'RISING':           'Rising¦Mentions accelerating (1.5x+) but not yet spreading across shows.',
+  'STEADY':           'Steady¦Present in the conversation at its normal level. Background, not a mover.',
+};
+
+function tipAttr(key) {
+  return RADAR_TIPS[key] ? ` data-tip="${escAttr(RADAR_TIPS[key])}"` : '';
+}
+
 function renderSignals(data) {
   const sigEl   = document.getElementById('radar-signals');
   const briefEl = document.getElementById('radar-brief');
@@ -890,7 +1103,7 @@ function renderSignals(data) {
         <td class="signal-delta">${s.baseline_weekly}</td>
         <td>${vel}</td>
         <td class="signal-delta">${s.breadth}</td>
-        <td><span class="sig-badge ${cls}">${escapeHtml(s.status)}</span></td>
+        <td><span class="sig-badge ${cls}"${tipAttr(s.status)}>${escapeHtml(s.status)}</span></td>
         <td><button class="signal-mute" data-term="${termAttr}" title="Mute — not a real signal">✕</button></td>
       </tr>
       <tr class="evidence-row" data-evidence="${termAttr}" style="display:none">
@@ -898,7 +1111,16 @@ function renderSignals(data) {
       </tr>`;
     }).join('');
     sigEl.innerHTML = `<table class="signal-table">
-      <thead><tr><th>Signal</th><th>8-wk trend</th><th>7-day</th><th>Base/wk</th><th>Velocity</th><th># Shows</th><th>Status</th><th></th></tr></thead>
+      <thead><tr>
+        <th${tipAttr('col-signal')}>Signal</th>
+        <th${tipAttr('col-trend')}>8-wk trend</th>
+        <th${tipAttr('col-7day')}>7-day</th>
+        <th${tipAttr('col-base')}>Base/wk</th>
+        <th${tipAttr('col-velocity')}>Velocity</th>
+        <th${tipAttr('col-shows')}># Shows</th>
+        <th${tipAttr('col-status')}>Status</th>
+        <th></th>
+      </tr></thead>
       <tbody>${rows}</tbody></table>`;
     loadSparklines(shown.map(s => s.term));
   } else {
@@ -957,6 +1179,30 @@ async function loadSparklines(terms) {
     }
   } catch {}
 }
+
+// Hover tooltips — any element with data-tip="Title¦body" gets a floating
+// definition card. One shared div, positioned next to the element, clamped
+// to the window so it never gets cut off.
+const hoverTip = document.getElementById('hover-tip');
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) return;
+  const [title, body] = el.dataset.tip.split('¦');
+  hoverTip.innerHTML = (body ? `<span class="tip-title">${escapeHtml(title)}</span>${escapeHtml(body)}`
+                             : escapeHtml(title));
+  hoverTip.style.display = 'block';
+  const r = el.getBoundingClientRect();
+  const tw = hoverTip.offsetWidth, th = hoverTip.offsetHeight;
+  let x = r.left + r.width / 2 - tw / 2;
+  x = Math.max(8, Math.min(x, window.innerWidth - tw - 8));
+  let y = r.bottom + 8;
+  if (y + th > window.innerHeight - 8) y = r.top - th - 8;   // flip above if no room
+  hoverTip.style.left = x + 'px';
+  hoverTip.style.top  = y + 'px';
+});
+document.addEventListener('mouseout', e => {
+  if (e.target.closest('[data-tip]')) hoverTip.style.display = 'none';
+});
 
 // Row click → toggle the evidence panel (which episodes said it, when, how often)
 document.getElementById('radar-signals').addEventListener('click', async e => {

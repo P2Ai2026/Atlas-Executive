@@ -1,13 +1,22 @@
+# ── shared ──
+node_modules/
+logs
+*.log
+npm-debug.log*
+.npm
+*.tgz
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# ── AI Operations Hub (Streamlit) ──
 podcast_audio/
 archive/
 meeting_audio/
 __pycache__/
 *.pyc
-.DS_Store
-.env
 venv/
-.env.*
-!.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

@@ -8,6 +8,7 @@ const { loadConfig, saveConfig } = require('./src/config');
 const scheduler = require('./src/scheduler');
 const { getAgentReports, getAgentHighlights, getSignals, getTermSeries,
         getTermEvidence, muteTerm, runAgent, AGENT_CONFIG } = require('./src/agents');
+const library = require('./src/library');
 
 let win;
 let conversationHistory = [];
@@ -224,6 +225,24 @@ ipcMain.handle('signals:series',   (_, terms) => getTermSeries(terms || []));
 ipcMain.handle('signals:evidence', (_, term)  => getTermEvidence(term));
 ipcMain.handle('signals:mute',     (_, term)  => muteTerm(term));
 
+// ── Library ───────────────────────────────────────────────────────────────────
+ipcMain.handle('library:list', () => library.listDocs());
+ipcMain.handle('library:import-dialog', async () => {
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Add documents to the Library',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Documents', extensions: ['txt', 'md', 'pdf'] }],
+  });
+  if (result.canceled) return { added: [], docs: library.listDocs() };
+  return library.importFiles(result.filePaths);
+});
+ipcMain.handle('library:import-paths', (_, paths) => library.importFiles(paths));
+ipcMain.handle('library:summarize', (_, name) => library.summarizeDoc(name));
+ipcMain.handle('library:search', (_, term) => library.searchDocs(term));
+ipcMain.handle('library:ask', (_, question) => library.askLibrary(question));
+ipcMain.handle('library:reveal', () => { shell.openPath(library.LIB_DIR); return true; });
+
 ipcMain.handle('agent:open', (_, filePath) => {
   shell.openPath(filePath);
   return true;
@@ -360,8 +379,15 @@ async function runDigest() {
     const toDelete = emails.filter(e => blocked.includes(extractAddr(e.from?.emailAddress?.address)));
     for (const e of toDelete) await deleteMail(e.id, cfg);
 
-    // 3. Filter remaining
-    const remaining = emails.filter(e => !toDelete.find(d => d.id === e.id));
+    // 3. Filter remaining — drop deleted emails AND anything the user already
+    // marked complete in a previous brief (Paper Trail entries carry the email
+    // ID; restoring an entry from the trail lets the email reappear)
+    const completedIds = new Set(
+      loadTrail().filter(e => e.source === 'brief' && e.emailId).map(e => e.emailId)
+    );
+    const remaining = emails.filter(e =>
+      !toDelete.find(d => d.id === e.id) && !completedIds.has(e.id)
+    );
 
     // 4. Summarise with Ollama, passing starlist and full profile for priority flagging
     const profile = { userName: cfg.userName, userTitle: cfg.userTitle, people: cfg.people || [] };
