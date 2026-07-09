@@ -606,7 +606,9 @@ class PodState(TypedDict):
     episodes: list          # business podcasts, enriched at each node
     bible: Optional[dict]   # the devotional episode, separate lane
     signals: list           # computed cross-run signal stats
+    opportunities: list     # signal -> exposure/bull/bear mapping (NEW)
     synthesis: str          # the A/B/C brief
+    red_team: str           # contrarian stress-test of the brief (NEW)
     pdf_path: str
 
 
@@ -741,14 +743,96 @@ def signals_node(state):
     return {"signals": signals}
 
 
+# =====================================================================
+# OPPORTUNITY MAPPING -- signal -> investable exposure (NEW)
+# =====================================================================
+# IMPORTANT: this node maps signals to companies with a bull case, bear
+# case, and a falsifiable trigger. It does NOT output "buy" / "sell"
+# directives -- that's a deliberate choice, not a limitation. A brief that
+# shows its reasoning and where it could be wrong is more useful to an
+# executive (and more honest) than a black-box recommendation would be.
+
+OPPORTUNITY_STATUSES = ("FRINGE RISING", "NEW", "GOING MAINSTREAM", "EMERGING")
+MAX_OPPORTUNITIES = 5
+
+
+def opportunity_node(state):
+    print("[opportunity] mapping top signals to investable exposure...")
+    signals = state.get("signals", [])
+    top = [s for s in signals if s["status"] in OPPORTUNITY_STATUSES][:MAX_OPPORTUNITIES]
+    if not top:
+        return {"opportunities": []}
+
+    opportunities = []
+    for s in top:
+        vel_text = "new (no baseline)" if s["velocity"] is None else f"{s['velocity']}x"
+        out = llm_call(
+            "You are a skeptical equity research analyst working for an internal "
+            "strategy team. You do NOT give buy/sell directives or personalized "
+            "investment advice -- you map a market signal to PUBLIC companies with "
+            "real exposure, then lay out the bull case, the bear case, and a "
+            "concrete falsifiable trigger. If you are not confident a company has "
+            "real, direct exposure, say so explicitly instead of guessing or "
+            "padding the list.",
+            f"Signal: {s['term']} -- status: {s['status']}, velocity: {vel_text}, "
+            f"mentioned on {s['breadth']} show(s) this week ({', '.join(s['shows'])}).\n\n"
+            "Respond in exactly these four labelled parts:\n"
+            "EXPOSURE: 2-4 public companies/tickers with real, direct exposure to "
+            "this signal (write 'no clear public exposure' if none fit).\n"
+            "BULL CASE: why this signal, if it keeps accelerating, benefits them.\n"
+            "BEAR CASE: why this could stall out, reverse, or already be priced in.\n"
+            "CONFIRM/KILL TRIGGER: one concrete, checkable thing -- a filing, an "
+            "earnings line, a capacity announcement -- that would validate or "
+            "invalidate this within 30-60 days.",
+        )
+        opportunities.append({
+            "signal": s["term"],
+            "status": s["status"],
+            "velocity": s["velocity"],
+            "breadth": s["breadth"],
+            "analysis": out,
+        })
+    return {"opportunities": opportunities}
+
+
+# =====================================================================
+# RED TEAM -- contrarian stress-test of the finished brief (NEW)
+# =====================================================================
+# Runs AFTER synthesis. Its only job is to argue with the brief: which
+# claims are thin, overconfident, or contradicted elsewhere. This is what
+# "critique" means at the brief level (episode-level critique already
+# happens in analyze_node) -- a second, adversarial pass over the
+# conclusions rather than the raw material.
+
+def stress_test(synthesis: str, opportunities: list) -> str:
+    if not synthesis or synthesis.startswith("["):
+        return "[skipped: no synthesis to stress-test]"
+    opp_text = "\n\n".join(
+        f"{o['signal']} ({o['status']}):\n{o['analysis']}" for o in opportunities
+    ) or "(no opportunity mapping today)"
+    return llm_call(
+        "You are a skeptical devil's advocate reviewing an internal strategy brief "
+        "before it goes to executives. Your only job is to find the weakest claims "
+        "and say plainly why they might be wrong. Be specific -- name the claim, "
+        "then the reason to doubt it. Do not soften with praise.",
+        "Stress-test this brief. For each major claim, flag if it is "
+        "overconfident, based on thin data (e.g. only 1-2 shows, brand-new "
+        "signal with no baseline), or contradicted by anything else here. "
+        "End with one line: is today's overall signal-to-noise HIGH, MEDIUM, "
+        "or LOW confidence, and why.\n\n"
+        f"SYNTHESIS:\n{synthesis}\n\nOPPORTUNITY MAPPING:\n{opp_text}",
+    )
+
+
 def synthesize_node(state):
     print("[synthesize] the A/B/C brief: where / what it means / how to act...")
     signals = state.get("signals", [])
+    opportunities = state.get("opportunities", [])
     stats = signals_table_text(signals)
     usable = [e for e in state["episodes"] if not e.get("analysis", "[").startswith("[")]
 
     if not usable and not signals:
-        return {"synthesis": "No new episodes and no active signals today."}
+        return {"synthesis": "No new episodes and no active signals today.", "red_team": ""}
 
     episode_digest = "\n\n".join(
         f"## {e['podcast']} -- {e['title']} (relevance: {e['relevance']})\n{e['analysis']}"
@@ -757,25 +841,39 @@ def synthesize_node(state):
     if approx_tokens(episode_digest) > CHUNK_TOKENS * 2:
         episode_digest = summarize_long(episode_digest, "today's slate of episodes")
 
+    opp_digest = "\n\n".join(
+        f"## {o['signal']} ({o['status']})\n{o['analysis']}" for o in opportunities
+    ) or "(no opportunity mapping today)"
+
     synthesis = llm_call(
         "You are a strategy analyst for an AI-/data-center-infrastructure company. "
         "Your job is early warning: change starts at the fringe and moves mainstream. "
-        "Reason FROM the measured signal table -- cite its numbers (mentions, velocity, "
-        "show counts). Do not invent statistics that are not in the table.",
+        "Reason FROM the measured signal table and the opportunity mapping provided -- "
+        "cite their numbers (mentions, velocity, show counts) and company names. Do not "
+        "invent statistics or exposures that are not in the material given to you. You "
+        "are producing analysis, not personalized investment advice -- never write "
+        "'buy' or 'sell'; write what the signal implies and let the reader decide.",
         f"Our business: {BUSINESS_LENS}.\n\n"
         f"MEASURED SIGNALS (7-day window vs prior 3-week baseline):\n{stats}\n\n"
+        f"OPPORTUNITY MAPPING (signal -> exposure/bull/bear/trigger):\n{opp_digest}\n\n"
         f"TODAY'S EPISODES:\n{episode_digest}\n\n"
-        "Write a tight daily brief with EXACTLY these four sections:\n"
+        "Write a tight daily brief with EXACTLY these five sections:\n"
         "WHERE THE CHANGE IS HAPPENING: 2-4 bullets. Lead with FRINGE RISING and NEW "
         "signals -- the things only 1-2 shows are saying but saying loudly. Cite the numbers.\n"
         "WHAT IT MEANS FOR OUR BUSINESS: 2-4 bullets tying those signals to chips, power, "
         "HVAC, machinery, or data-center construction. Be concrete about which line of "
         "business is exposed or advantaged.\n"
+        "INVESTABLE EXPOSURE: 2-4 bullets summarizing the strongest company-level exposure "
+        "from the opportunity mapping, with the one-line bull case and bear case for each. "
+        "Frame as 'worth watching because...', never as a directive.\n"
         "HOW TO ACT: 2-4 specific, near-term moves (a call to make, a vendor to evaluate, "
         "a market to price, a hire to consider). No platitudes.\n"
         "WATCH NEXT: 1-3 signals to check tomorrow, with the threshold that would confirm them.",
     )
-    return {"synthesis": synthesis}
+
+    print("[redteam]    stress-testing the brief...")
+    red_team = stress_test(synthesis, opportunities)
+    return {"synthesis": synthesis, "red_team": red_team}
 
 
 def report_node(state):
@@ -796,7 +894,9 @@ def report_node(state):
         ],
         "signals": [{k: v for k, v in s.items() if k != "score"}
                     for s in state.get("signals", [])[:25]],
+        "opportunities": state.get("opportunities", []),
         "synthesis": state.get("synthesis", ""),
+        "red_team": state.get("red_team", ""),
     }
     with open(SIGNALS_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=1)
@@ -809,7 +909,8 @@ def report_node(state):
     pdf_name = f"podcast_brief_{datetime.now().strftime('%Y%m%d')}.pdf"
     pdf_path = os.path.join(OUTPUT_DIR, pdf_name)
     render_pdf(state.get("synthesis", ""), eps, state["bible"],
-               state.get("signals", []), pdf_path)
+               state.get("signals", []), state.get("opportunities", []),
+               state.get("red_team", ""), pdf_path)
     return {"episodes": eps, "pdf_path": pdf_path}
 
 
@@ -895,7 +996,7 @@ def _whisper_transcribe(audio_url: str) -> str:
 # PDF + EMAIL (HITL -- draft only, NEVER send)
 # =====================================================================
 
-def render_pdf(synthesis, episodes, bible, signals, path):
+def render_pdf(synthesis, episodes, bible, signals, opportunities, red_team, path):
     _ensure_package("reportlab")
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -1027,7 +1128,7 @@ def render_pdf(synthesis, episodes, bible, signals, path):
                 Paragraph(str(s["baseline_weekly"]), cell),
                 Paragraph("—" if s["velocity"] is None else f"{s['velocity']}x", cell),
                 Paragraph(str(s["breadth"]), cell),
-                Paragraph(f"<font color='{color.hexval()[2:] if hasattr(color,'hexval') else '000000'}'>"
+                Paragraph(f"<font color='{('#' + color.hexval()[2:]) if hasattr(color,'hexval') else '#000000'}'>"
                           f"<b>{s['status']}</b></font>", cell),
             ])
         t = Table(rows, colWidths=[usable*0.34, usable*0.10, usable*0.12,
@@ -1057,6 +1158,30 @@ def render_pdf(synthesis, episodes, bible, signals, path):
     flow += [section_band("Where the Change Is Happening / What It Means / How to Act", INK),
              Spacer(1, 6)]
     flow += md_flow(synthesis)
+
+    if opportunities:
+        flow += [Spacer(1, 14),
+                 section_band("Investable Exposure — signal → companies (not advice)", GOLD),
+                 Spacer(1, 6),
+                 Paragraph("<i>Mapped exposure with bull/bear case and a falsifiable "
+                           "trigger. This is analysis to inform your own judgment, "
+                           "not a buy/sell recommendation.</i>", sub),
+                 Spacer(1, 4)]
+        for o in opportunities:
+            card = Table(
+                [[Paragraph(f"<b>{o['signal']}</b> &nbsp;·&nbsp; {o['status']}", name)]],
+                colWidths=[usable])
+            card.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+            flow.append(card)
+            flow += md_flow(o["analysis"])
+            flow.append(Spacer(1, 8))
+
+    if red_team and not red_team.startswith("["):
+        flow += [Spacer(1, 10),
+                 section_band("Red Team — stress-testing today's brief", colors.HexColor("#7c2d12")),
+                 Spacer(1, 6)]
+        flow += md_flow(red_team)
+
     flow += [Spacer(1, 14), section_band("Per-Episode Breakdown", INK), Spacer(1, 10)]
     for e in episodes:
         flow.append(episode_card(e))
@@ -1105,6 +1230,7 @@ def build_agent():
     g.add_node("summarize", summarize_node)
     g.add_node("analyze", analyze_node)
     g.add_node("signals", signals_node)
+    g.add_node("opportunity", opportunity_node)
     g.add_node("synthesize", synthesize_node)
     g.add_node("report", report_node)
 
@@ -1113,7 +1239,8 @@ def build_agent():
     g.add_edge("transcribe", "summarize")
     g.add_edge("summarize", "analyze")
     g.add_edge("analyze", "signals")
-    g.add_edge("signals", "synthesize")
+    g.add_edge("signals", "opportunity")
+    g.add_edge("opportunity", "synthesize")
     g.add_edge("synthesize", "report")
     g.add_edge("report", END)
     return g.compile()
@@ -1124,7 +1251,8 @@ def main():
     ensure_ollama()
     agent = build_agent()
     final = agent.invoke({"episodes": [], "bible": None, "signals": [],
-                          "synthesis": "", "pdf_path": ""})
+                          "opportunities": [], "synthesis": "", "red_team": "",
+                          "pdf_path": ""})
 
     print(f"\nSignals JSON: {SIGNALS_FILE}")
     if final.get("pdf_path"):
