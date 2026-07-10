@@ -175,6 +175,8 @@ CACHE_DIR    = os.path.join(OUTPUT_DIR, ".transcript_cache")
 HISTORY_FILE = os.path.join(OUTPUT_DIR, "signal_history.json")
 SIGNALS_FILE = os.path.join(OUTPUT_DIR, "signals_latest.json")
 FEEDS_FILE   = os.path.join(OUTPUT_DIR, "feeds_cache.json")   # pinned RSS URLs
+PREDICTIONS_FILE = os.path.join(OUTPUT_DIR, "predictions.json")  # track record (NEW)
+PREDICTION_CHECK_DAYS = 45   # how long a prediction rides before we score it
 
 
 # =====================================================================
@@ -606,9 +608,11 @@ class PodState(TypedDict):
     episodes: list          # business podcasts, enriched at each node
     bible: Optional[dict]   # the devotional episode, separate lane
     signals: list           # computed cross-run signal stats
-    opportunities: list     # signal -> exposure/bull/bear mapping (NEW)
+    opportunities: list     # signal -> exposure/bull/bear mapping
+    track_record: dict      # scoreboard across all resolved predictions (NEW)
+    newly_resolved: list    # predictions scored just this run (NEW)
     synthesis: str          # the A/B/C brief
-    red_team: str           # contrarian stress-test of the brief (NEW)
+    red_team: str           # contrarian stress-test of the brief
     pdf_path: str
 
 
@@ -830,6 +834,126 @@ def stress_test(synthesis: str, opportunities: list) -> str:
     )
 
 
+# =====================================================================
+# PREDICTION TRACKING -- does the agent's own call-out hold up? (NEW)
+# =====================================================================
+# Every time opportunity_node flags a signal, that call gets logged with a
+# check-back date. On a later run, once that date has passed, we look at
+# what actually happened to the SAME signal in our own measured data
+# (velocity/breadth) and score it: did the trend keep accelerating,
+# broaden, or fade? Self-contained and quantitative -- no extra model
+# call, no guessing. Over months this becomes a real track record.
+
+def load_predictions() -> dict:
+    try:
+        with open(PREDICTIONS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"predictions": []}
+
+
+def save_predictions(preds: dict):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(PREDICTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(preds, f, indent=1)
+
+
+def record_new_predictions(preds: dict, opportunities: list):
+    open_terms = {p["signal"] for p in preds["predictions"] if not p["resolved"]}
+    today = datetime.now().strftime("%Y-%m-%d")
+    check_after = (datetime.now() + timedelta(days=PREDICTION_CHECK_DAYS)).strftime("%Y-%m-%d")
+    for o in opportunities:
+        if o["signal"] in open_terms:
+            continue
+        preds["predictions"].append({
+            "id": hashlib.md5(f"{o['signal']}-{today}".encode()).hexdigest()[:10],
+            "date_created": today,
+            "signal": o["signal"],
+            "status_at_creation": o["status"],
+            "velocity_at_creation": o["velocity"],
+            "breadth_at_creation": o["breadth"],
+            "analysis": o["analysis"],
+            "check_after": check_after,
+            "resolved": False,
+            "verdict": None,
+            "resolved_date": None,
+            "resolution_note": None,
+        })
+
+
+def review_predictions(preds: dict, current_signals: list) -> list:
+    today = datetime.now().strftime("%Y-%m-%d")
+    by_term = {s["term"]: s for s in current_signals}
+    newly_resolved = []
+    for p in preds["predictions"]:
+        if p["resolved"] or p["check_after"] > today:
+            continue
+        now = by_term.get(p["signal"])
+        if now is None:
+            verdict = "FADED"
+            note = f"'{p['signal']}' dropped off the radar entirely -- no mentions in the current window."
+        elif now["status"] in ("MAINSTREAM", "GOING MAINSTREAM"):
+            verdict = "CONFIRMED"
+            note = (f"'{p['signal']}' went mainstream: now mentioned on {now['breadth']} "
+                    f"show(s), status {now['status']}.")
+        else:
+            old_v = p["velocity_at_creation"] or 0
+            new_v = now["velocity"] or 0
+            old_b = p["breadth_at_creation"] or 0
+            new_b = now["breadth"]
+            if new_v >= old_v and new_b >= old_b:
+                verdict = "CONTINUED"
+                note = (f"'{p['signal']}' kept accelerating: velocity {old_v}x -> {new_v}x, "
+                        f"breadth {old_b} -> {new_b} shows.")
+            elif new_b > old_b:
+                verdict = "BROADENING"
+                note = (f"'{p['signal']}' spread to more shows ({old_b} -> {new_b}) but "
+                        f"velocity cooled ({old_v}x -> {new_v}x).")
+            else:
+                verdict = "STALLED"
+                note = (f"'{p['signal']}' cooled off: velocity {old_v}x -> {new_v}x, "
+                        f"breadth {old_b} -> {new_b} shows.")
+        p["resolved"] = True
+        p["verdict"] = verdict
+        p["resolved_date"] = today
+        p["resolution_note"] = note
+        newly_resolved.append(p)
+    return newly_resolved
+
+
+def track_record_summary(preds: dict) -> dict:
+    resolved = [p for p in preds["predictions"] if p["resolved"]]
+    if not resolved:
+        return {"total": 0}
+    counts = {}
+    for p in resolved:
+        counts[p["verdict"]] = counts.get(p["verdict"], 0) + 1
+    held_up = counts.get("CONFIRMED", 0) + counts.get("CONTINUED", 0) + counts.get("BROADENING", 0)
+    return {
+        "total": len(resolved),
+        "counts": counts,
+        "held_up_pct": round(100 * held_up / len(resolved)),
+        "pending": len([p for p in preds["predictions"] if not p["resolved"]]),
+    }
+
+
+def predictions_node(state):
+    print("[predictions] scoring past calls + logging today's...")
+    signals = state.get("signals", [])
+    opportunities = state.get("opportunities", [])
+    preds = load_predictions()
+    newly_resolved = review_predictions(preds, signals)
+    if newly_resolved:
+        for p in newly_resolved:
+            print(f"             {p['verdict']:<10} {p['signal']} -- {p['resolution_note']}")
+    record_new_predictions(preds, opportunities)
+    save_predictions(preds)
+    return {
+        "track_record": track_record_summary(preds),
+        "newly_resolved": newly_resolved,
+    }
+
+
 def synthesize_node(state):
     print("[synthesize] the A/B/C brief: where / what it means / how to act...")
     signals = state.get("signals", [])
@@ -902,6 +1026,7 @@ def report_node(state):
         "signals": [{k: v for k, v in s.items() if k != "score"}
                     for s in state.get("signals", [])[:25]],
         "opportunities": state.get("opportunities", []),
+        "track_record": state.get("track_record", {}),
         "synthesis": state.get("synthesis", ""),
         "red_team": state.get("red_team", ""),
     }
@@ -917,7 +1042,8 @@ def report_node(state):
     pdf_path = os.path.join(OUTPUT_DIR, pdf_name)
     render_pdf(state.get("synthesis", ""), eps, state["bible"],
                state.get("signals", []), state.get("opportunities", []),
-               state.get("red_team", ""), pdf_path)
+               state.get("red_team", ""), state.get("track_record", {}),
+               state.get("newly_resolved", []), pdf_path)
     return {"episodes": eps, "pdf_path": pdf_path}
 
 
@@ -1003,7 +1129,8 @@ def _whisper_transcribe(audio_url: str) -> str:
 # PDF + EMAIL (HITL -- draft only, NEVER send)
 # =====================================================================
 
-def render_pdf(synthesis, episodes, bible, signals, opportunities, red_team, path):
+def render_pdf(synthesis, episodes, bible, signals, opportunities, red_team,
+               track_record, newly_resolved, path):
     _ensure_package("reportlab")
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -1158,6 +1285,27 @@ def render_pdf(synthesis, episodes, bible, signals, opportunities, red_team, pat
             Paragraph(f"{datetime.now():%A, %B %d, %Y}  ·  lens: {BUSINESS_LENS}", sub),
             Spacer(1, 8)]
 
+    if track_record.get("total", 0) > 0:
+        c = track_record["counts"]
+        parts = ", ".join(f"{v} {k.lower()}" for k, v in c.items())
+        flow += [section_band("Track Record -- does this agent's own calls hold up?", GOLD),
+                 Spacer(1, 6),
+                 Paragraph(f"<b>{track_record['held_up_pct']}%</b> of resolved calls held up "
+                           f"(kept accelerating or went mainstream) out of "
+                           f"<b>{track_record['total']}</b> scored to date "
+                           f"({parts}). {track_record['pending']} calls still pending "
+                           f"(checked back {PREDICTION_CHECK_DAYS} days after the call).", body)]
+        if newly_resolved:
+            flow.append(Spacer(1, 4))
+            flow.append(Paragraph("<b>Scored today:</b>", head))
+            for p in newly_resolved:
+                good = p['verdict'] in ('CONFIRMED', 'CONTINUED', 'BROADENING')
+                flow.append(Paragraph(
+                    f"<font color='{'#2e7d32' if good else '#dc2626'}'>"
+                    f"<b>{p['verdict']}</b></font> -- {inline(p['resolution_note'])}",
+                    bull, bulletText="•"))
+        flow.append(Spacer(1, 14))
+
     if signals:
         flow += [section_band("Signal Radar — 7-day window vs 3-week baseline", INK),
                  Spacer(1, 6), signal_table(signals), Spacer(1, 14)]
@@ -1238,6 +1386,7 @@ def build_agent():
     g.add_node("analyze", analyze_node)
     g.add_node("signals", signals_node)
     g.add_node("opportunity", opportunity_node)
+    g.add_node("predictions", predictions_node)
     g.add_node("synthesize", synthesize_node)
     g.add_node("report", report_node)
 
@@ -1247,7 +1396,8 @@ def build_agent():
     g.add_edge("summarize", "analyze")
     g.add_edge("analyze", "signals")
     g.add_edge("signals", "opportunity")
-    g.add_edge("opportunity", "synthesize")
+    g.add_edge("opportunity", "predictions")
+    g.add_edge("predictions", "synthesize")
     g.add_edge("synthesize", "report")
     g.add_edge("report", END)
     return g.compile()
@@ -1258,8 +1408,8 @@ def main():
     ensure_ollama()
     agent = build_agent()
     final = agent.invoke({"episodes": [], "bible": None, "signals": [],
-                          "opportunities": [], "synthesis": "", "red_team": "",
-                          "pdf_path": ""})
+                          "opportunities": [], "track_record": {}, "newly_resolved": [],
+                          "synthesis": "", "red_team": "", "pdf_path": ""})
 
     print(f"\nSignals JSON: {SIGNALS_FILE}")
     if final.get("pdf_path"):
