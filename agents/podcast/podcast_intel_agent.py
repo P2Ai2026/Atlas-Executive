@@ -359,17 +359,34 @@ def _get_llm():
 
 
 def llm_call(system: str, user: str) -> str:
+    """One model call over plain HTTP with a HARD read timeout and one retry.
+    (The old langchain path had no timeout -- a wedged Ollama response blocked
+    the whole run forever. A local model that hasn't answered in 10 minutes
+    isn't going to.)"""
     if BUDGET.over:
         return "[skipped: run token budget exhausted]"
     BUDGET.add(approx_tokens(system) + approx_tokens(user))
-    msgs = [("system", system), ("human", user)]
-    try:
-        resp = _get_llm().invoke(msgs)
-        out = resp.content if hasattr(resp, "content") else str(resp)
-        BUDGET.add(approx_tokens(out))
-        return out.strip()
-    except Exception as e:
-        return f"[model error: {e}]"
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+        "options": {"temperature": 0.2},
+    }
+    last_err = None
+    for attempt in (1, 2):
+        try:
+            r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload,
+                              timeout=(10, 600))
+            r.raise_for_status()
+            out = (r.json().get("message") or {}).get("content", "")
+            BUDGET.add(approx_tokens(out))
+            return out.strip()
+        except Exception as e:
+            last_err = e
+            print(f"             ! model call failed (attempt {attempt}): {e}")
+            time.sleep(5)
+    return f"[model error: {last_err}]"
 
 
 def summarize_long(text: str, what: str) -> str:
@@ -1125,7 +1142,7 @@ def _whisper_transcribe(audio_url: str) -> str:
     from faster_whisper import WhisperModel
     try:
         tmp = "/tmp/_episode_audio"
-        with requests.get(audio_url, stream=True, timeout=120) as r:
+        with requests.get(audio_url, stream=True, timeout=(15, 120)) as r:
             with open(tmp, "wb") as f:
                 for chunk in r.iter_content(1 << 16):
                     f.write(chunk)
