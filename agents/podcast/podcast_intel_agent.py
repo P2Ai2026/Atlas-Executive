@@ -1136,21 +1136,56 @@ def _strip_vtt(body: str) -> str:
     return " ".join(lines)
 
 
+_WHISPER = None
+
+def _get_whisper():
+    """Load the Whisper model ONCE per run, preferring the local cache so no
+    network call happens at all. (Constructing it per episode re-checked
+    HuggingFace each time — one hung socket froze a whole scan for hours.)"""
+    global _WHISPER
+    if _WHISPER is None:
+        from faster_whisper import WhisperModel
+        try:
+            _WHISPER = WhisperModel(WHISPER_MODEL, compute_type="int8",
+                                    local_files_only=True)
+        except Exception:
+            # first ever run: model not downloaded yet -- allow one network fetch
+            _WHISPER = WhisperModel(WHISPER_MODEL, compute_type="int8")
+    return _WHISPER
+
+
+class _StallGuard:
+    """Hard wall-clock ceiling on a block of work, via SIGALRM. Whatever
+    stalls inside — a socket, a decoder, a library bug — the run moves on."""
+    def __init__(self, seconds):
+        self.seconds = seconds
+    def __enter__(self):
+        import signal
+        signal.signal(signal.SIGALRM,
+                      lambda *_: (_ for _ in ()).throw(TimeoutError("stall guard tripped")))
+        signal.alarm(self.seconds)
+    def __exit__(self, *args):
+        import signal
+        signal.alarm(0)
+
+
 def _whisper_transcribe(audio_url: str) -> str:
     if not _ensure_package("faster_whisper", "faster-whisper"):
         return "[whisper unavailable: set AUTO_INSTALL=True or pip install faster-whisper]"
-    from faster_whisper import WhisperModel
     try:
-        tmp = "/tmp/_episode_audio"
-        with requests.get(audio_url, stream=True, timeout=(15, 120)) as r:
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_content(1 << 16):
-                    f.write(chunk)
-        model = WhisperModel(WHISPER_MODEL, compute_type="int8")
-        segments, info = model.transcribe(tmp)
-        if info.duration and info.duration / 60 > MAX_AUDIO_MINUTES:
-            return "[episode too long for this run]"
-        return " ".join(seg.text for seg in segments)
+        with _StallGuard(60 * 60):   # no single episode may take over an hour
+            tmp = "/tmp/_episode_audio"
+            with requests.get(audio_url, stream=True, timeout=(15, 120)) as r:
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_content(1 << 16):
+                        f.write(chunk)
+            model = _get_whisper()
+            segments, info = model.transcribe(tmp)
+            if info.duration and info.duration / 60 > MAX_AUDIO_MINUTES:
+                return "[episode too long for this run]"
+            return " ".join(seg.text for seg in segments)
+    except TimeoutError:
+        return "[transcription timed out after 60 minutes -- skipped]"
     except Exception as e:
         return f"[transcription failed: {e}]"
 
