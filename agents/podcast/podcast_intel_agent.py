@@ -628,10 +628,23 @@ def load_feed_cache() -> dict:
         return {}
 
 
+def effective_lookback(history) -> int:
+    """Catch-up logic: if the scanner missed days (laptop closed, app not
+    running), widen the window back to the last processed episode so nothing
+    is lost forever. Capped at 7 days to keep a catch-up run bounded."""
+    try:
+        newest = max(e["date"] for e in history["episodes"])
+        gap = (datetime.now() - datetime.strptime(newest, "%Y-%m-%d")).days + 1
+        return min(7, max(LOOKBACK_DAYS, gap))
+    except ValueError:
+        return 7   # empty history -- first run pulls a full week
+
+
 def fetch_node(state):
-    print("[fetch]      finding new episodes (daily window)...")
     history = load_history()
     seen = {e["id"] for e in history["episodes"]}
+    lookback = effective_lookback(history)
+    print(f"[fetch]      finding new episodes (window: last {lookback} days)...")
     # Pin resolved RSS URLs: look each show up ONCE, then reuse the cached URL
     # every day after — faster, and immune to the lookup grabbing a clone feed.
     # To force a re-lookup (e.g. a show moves hosts), delete its line from
@@ -649,7 +662,7 @@ def fetch_node(state):
         if not feed:
             print(f"             - {pod['name']}: no feed found, skipping")
             continue
-        eps = recent_episodes(feed, LOOKBACK_DAYS)
+        eps = recent_episodes(feed, lookback)
         fresh = [e for e in eps if episode_id(e) not in seen]
         if not fresh:
             print(f"             - {pod['name']}: nothing new")
