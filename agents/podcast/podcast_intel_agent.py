@@ -312,6 +312,35 @@ def ensure_ollama(model=OLLAMA_MODEL, wait_seconds=30):
                 "then re-run. (Install it from https://ollama.com/download if needed.)")
         print("[ollama]     server is up.")
     _ensure_model(model)
+    # A wedged Ollama answers /api/tags but never generates -- demand proof of
+    # life with a real (tiny) generation, and restart the app once if it fails.
+    if not _ollama_generates(model):
+        print("[ollama]     server answers but will not generate -- restarting it...")
+        subprocess.run(["osascript", "-e", 'quit app "Ollama"'], check=False)
+        time.sleep(3)
+        subprocess.run(["pkill", "-f", "llama-server"], check=False)
+        time.sleep(2)
+        _start_ollama()
+        for _ in range(wait_seconds):
+            if _ollama_up():
+                break
+            time.sleep(1)
+        if not _ollama_generates(model):
+            raise RuntimeError("Ollama will not generate even after a restart -- "
+                               "open the Ollama app manually and check it.")
+        print("[ollama]     healthy after restart.")
+
+
+def _ollama_generates(model, timeout=90) -> bool:
+    """True only if the model actually produces tokens, not just answers pings."""
+    try:
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json={
+            "model": model, "stream": False,
+            "messages": [{"role": "user", "content": "Say OK"}],
+        }, timeout=(5, timeout))
+        return bool((r.json().get("message") or {}).get("content"))
+    except Exception:
+        return False
 
 
 def _ollama_up() -> bool:
