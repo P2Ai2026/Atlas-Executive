@@ -163,7 +163,7 @@ MAX_AUDIO_MINUTES = 150
 APPROX_CHARS_PER_TOKEN = 4
 CHUNK_TOKENS     = 2500
 MAX_ITERATIONS   = 5
-RUN_TOKEN_BUDGET = 250_000
+RUN_TOKEN_BUDGET = 400_000
 
 EMAIL_TO = "your.email@example.com"   # set this to enable the Mail DRAFT step
 
@@ -1497,8 +1497,43 @@ def build_agent():
     return g.compile()
 
 
+LOCK_FILE = os.path.join(OUTPUT_DIR, ".scan_lock")
+
+def acquire_lock() -> bool:
+    """One scan at a time, across ALL launchers (launchd, the app, manual).
+    A lock older than 3h is treated as a crashed run and stolen."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            age = time.time() - os.path.getmtime(LOCK_FILE)
+            if age < 3 * 3600:
+                return False
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception:
+        return True   # never let lock bookkeeping block a scan
+
+
+def release_lock():
+    try:
+        os.remove(LOCK_FILE)
+    except Exception:
+        pass
+
+
 def main():
+    if not acquire_lock():
+        print("Another scan is already running (lock held) -- exiting.")
+        return
     print("Running the podcast signal scanner (daily mode).\n")
+    try:
+        _run()
+    finally:
+        release_lock()
+
+
+def _run():
     ensure_ollama()
     agent = build_agent()
     final = agent.invoke({"episodes": [], "bible": None, "signals": [],
