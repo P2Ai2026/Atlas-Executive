@@ -163,7 +163,7 @@ MAX_AUDIO_MINUTES = 150
 APPROX_CHARS_PER_TOKEN = 4
 CHUNK_TOKENS     = 2500
 MAX_ITERATIONS   = 5
-RUN_TOKEN_BUDGET = 250_000
+RUN_TOKEN_BUDGET = 400_000
 
 EMAIL_TO = "your.email@example.com"   # set this to enable the Mail DRAFT step
 
@@ -312,6 +312,35 @@ def ensure_ollama(model=OLLAMA_MODEL, wait_seconds=30):
                 "then re-run. (Install it from https://ollama.com/download if needed.)")
         print("[ollama]     server is up.")
     _ensure_model(model)
+    # A wedged Ollama answers /api/tags but never generates -- demand proof of
+    # life with a real (tiny) generation, and restart the app once if it fails.
+    if not _ollama_generates(model):
+        print("[ollama]     server answers but will not generate -- restarting it...")
+        subprocess.run(["osascript", "-e", 'quit app "Ollama"'], check=False)
+        time.sleep(3)
+        subprocess.run(["pkill", "-f", "llama-server"], check=False)
+        time.sleep(2)
+        _start_ollama()
+        for _ in range(wait_seconds):
+            if _ollama_up():
+                break
+            time.sleep(1)
+        if not _ollama_generates(model):
+            raise RuntimeError("Ollama will not generate even after a restart -- "
+                               "open the Ollama app manually and check it.")
+        print("[ollama]     healthy after restart.")
+
+
+def _ollama_generates(model, timeout=90) -> bool:
+    """True only if the model actually produces tokens, not just answers pings."""
+    try:
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json={
+            "model": model, "stream": False,
+            "messages": [{"role": "user", "content": "Say OK"}],
+        }, timeout=(5, timeout))
+        return bool((r.json().get("message") or {}).get("content"))
+    except Exception:
+        return False
 
 
 def _ollama_up() -> bool:
@@ -359,17 +388,34 @@ def _get_llm():
 
 
 def llm_call(system: str, user: str) -> str:
+    """One model call over plain HTTP with a HARD read timeout and one retry.
+    (The old langchain path had no timeout -- a wedged Ollama response blocked
+    the whole run forever. A local model that hasn't answered in 10 minutes
+    isn't going to.)"""
     if BUDGET.over:
         return "[skipped: run token budget exhausted]"
     BUDGET.add(approx_tokens(system) + approx_tokens(user))
-    msgs = [("system", system), ("human", user)]
-    try:
-        resp = _get_llm().invoke(msgs)
-        out = resp.content if hasattr(resp, "content") else str(resp)
-        BUDGET.add(approx_tokens(out))
-        return out.strip()
-    except Exception as e:
-        return f"[model error: {e}]"
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+        "options": {"temperature": 0.2},
+    }
+    last_err = None
+    for attempt in (1, 2):
+        try:
+            r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload,
+                              timeout=(10, 600))
+            r.raise_for_status()
+            out = (r.json().get("message") or {}).get("content", "")
+            BUDGET.add(approx_tokens(out))
+            return out.strip()
+        except Exception as e:
+            last_err = e
+            print(f"             ! model call failed (attempt {attempt}): {e}")
+            time.sleep(5)
+    return f"[model error: {last_err}]"
 
 
 def summarize_long(text: str, what: str) -> str:
@@ -628,10 +674,23 @@ def load_feed_cache() -> dict:
         return {}
 
 
+def effective_lookback(history) -> int:
+    """Catch-up logic: if the scanner missed days (laptop closed, app not
+    running), widen the window back to the last processed episode so nothing
+    is lost forever. Capped at 7 days to keep a catch-up run bounded."""
+    try:
+        newest = max(e["date"] for e in history["episodes"])
+        gap = (datetime.now() - datetime.strptime(newest, "%Y-%m-%d")).days + 1
+        return min(7, max(LOOKBACK_DAYS, gap))
+    except ValueError:
+        return 7   # empty history -- first run pulls a full week
+
+
 def fetch_node(state):
-    print("[fetch]      finding new episodes (daily window)...")
     history = load_history()
     seen = {e["id"] for e in history["episodes"]}
+    lookback = effective_lookback(history)
+    print(f"[fetch]      finding new episodes (window: last {lookback} days)...")
     # Pin resolved RSS URLs: look each show up ONCE, then reuse the cached URL
     # every day after — faster, and immune to the lookup grabbing a clone feed.
     # To force a re-lookup (e.g. a show moves hosts), delete its line from
@@ -649,7 +708,7 @@ def fetch_node(state):
         if not feed:
             print(f"             - {pod['name']}: no feed found, skipping")
             continue
-        eps = recent_episodes(feed, LOOKBACK_DAYS)
+        eps = recent_episodes(feed, lookback)
         fresh = [e for e in eps if episode_id(e) not in seen]
         if not fresh:
             print(f"             - {pod['name']}: nothing new")
@@ -1316,21 +1375,56 @@ def _strip_vtt(body: str) -> str:
     return " ".join(lines)
 
 
+_WHISPER = None
+
+def _get_whisper():
+    """Load the Whisper model ONCE per run, preferring the local cache so no
+    network call happens at all. (Constructing it per episode re-checked
+    HuggingFace each time — one hung socket froze a whole scan for hours.)"""
+    global _WHISPER
+    if _WHISPER is None:
+        from faster_whisper import WhisperModel
+        try:
+            _WHISPER = WhisperModel(WHISPER_MODEL, compute_type="int8",
+                                    local_files_only=True)
+        except Exception:
+            # first ever run: model not downloaded yet -- allow one network fetch
+            _WHISPER = WhisperModel(WHISPER_MODEL, compute_type="int8")
+    return _WHISPER
+
+
+class _StallGuard:
+    """Hard wall-clock ceiling on a block of work, via SIGALRM. Whatever
+    stalls inside — a socket, a decoder, a library bug — the run moves on."""
+    def __init__(self, seconds):
+        self.seconds = seconds
+    def __enter__(self):
+        import signal
+        signal.signal(signal.SIGALRM,
+                      lambda *_: (_ for _ in ()).throw(TimeoutError("stall guard tripped")))
+        signal.alarm(self.seconds)
+    def __exit__(self, *args):
+        import signal
+        signal.alarm(0)
+
+
 def _whisper_transcribe(audio_url: str) -> str:
     if not _ensure_package("faster_whisper", "faster-whisper"):
         return "[whisper unavailable: set AUTO_INSTALL=True or pip install faster-whisper]"
-    from faster_whisper import WhisperModel
     try:
-        tmp = "/tmp/_episode_audio"
-        with requests.get(audio_url, stream=True, timeout=120) as r:
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_content(1 << 16):
-                    f.write(chunk)
-        model = WhisperModel(WHISPER_MODEL, compute_type="int8")
-        segments, info = model.transcribe(tmp)
-        if info.duration and info.duration / 60 > MAX_AUDIO_MINUTES:
-            return "[episode too long for this run]"
-        return " ".join(seg.text for seg in segments)
+        with _StallGuard(60 * 60):   # no single episode may take over an hour
+            tmp = "/tmp/_episode_audio"
+            with requests.get(audio_url, stream=True, timeout=(15, 120)) as r:
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_content(1 << 16):
+                        f.write(chunk)
+            model = _get_whisper()
+            segments, info = model.transcribe(tmp)
+            if info.duration and info.duration / 60 > MAX_AUDIO_MINUTES:
+                return "[episode too long for this run]"
+            return " ".join(seg.text for seg in segments)
+    except TimeoutError:
+        return "[transcription timed out after 60 minutes -- skipped]"
     except Exception as e:
         return f"[transcription failed: {e}]"
 
@@ -1617,8 +1711,43 @@ def build_agent():
     return g.compile()
 
 
+LOCK_FILE = os.path.join(OUTPUT_DIR, ".scan_lock")
+
+def acquire_lock() -> bool:
+    """One scan at a time, across ALL launchers (launchd, the app, manual).
+    A lock older than 3h is treated as a crashed run and stolen."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            age = time.time() - os.path.getmtime(LOCK_FILE)
+            if age < 3 * 3600:
+                return False
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception:
+        return True   # never let lock bookkeeping block a scan
+
+
+def release_lock():
+    try:
+        os.remove(LOCK_FILE)
+    except Exception:
+        pass
+
+
 def main():
+    if not acquire_lock():
+        print("Another scan is already running (lock held) -- exiting.")
+        return
     print("Running the podcast signal scanner (daily mode).\n")
+    try:
+        _run()
+    finally:
+        release_lock()
+
+
+def _run():
     ensure_ollama()
     agent = build_agent()
     final = agent.invoke({"episodes": [], "bible": None, "signals": [],
