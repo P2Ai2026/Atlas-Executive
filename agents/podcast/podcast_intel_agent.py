@@ -827,9 +827,129 @@ def signals_node(state):
 OPPORTUNITY_STATUSES = ("FRINGE RISING", "NEW", "GOING MAINSTREAM", "EMERGING")
 MAX_OPPORTUNITIES = 5
 
+# Curated signal -> ticker mapping (NEW). Rather than asking the model to
+# invent which companies are exposed to a signal -- which is exactly how it
+# hallucinated the Zoom/Azure relationship earlier -- we look up a small,
+# human-vetted set of real tickers per known signal term.
+#
+# Two shapes:
+#   - "primary" set: this signal IS a specific company (e.g. "google" ->
+#     GOOGL). The peers exist ONLY as comparison context (is the move
+#     sector-wide or GOOGL-specific?) -- they are never independently
+#     "exposed" or "not exposed", since the signal isn't about them.
+#   - "primary" is None: this is a THEME (e.g. "fuel cell"), and every
+#     ticker in "peers" is a genuine, independent candidate for exposure.
+# Terms not in this map fall back to the old model-guess path, clearly
+# flagged as unverified.
+TICKER_MAP = {
+    "google":                  {"primary": "GOOGL", "peers": ["MSFT", "AMZN", "META"]},
+    "youtube":                 {"primary": "GOOGL", "peers": ["MSFT", "META"]},
+    "amazon":                  {"primary": "AMZN", "peers": ["GOOGL", "MSFT", "META"]},
+    "amazon quick":            {"primary": "AMZN", "peers": ["GOOGL", "MSFT"]},
+    "microsoft":               {"primary": "MSFT", "peers": ["GOOGL", "AMZN", "META"]},
+    "meta":                    {"primary": "META", "peers": ["GOOGL", "MSFT", "AMZN"]},
+    "oracle":                  {"primary": "ORCL", "peers": ["MSFT", "CRM", "IBM"]},
+    "nvidia":                  {"primary": "NVDA", "peers": ["AMD", "AVGO", "TSM"]},
+    "palantir":                {"primary": "PLTR", "peers": ["SNOW", "AI", "PATH"]},
+    "saas":                    {"primary": None, "peers": ["CRM", "NOW", "WDAY", "ORCL"]},
+    "fuel cell":               {"primary": None, "peers": ["PLUG", "BLDP", "BE"]},
+    "nuclear power":           {"primary": None, "peers": ["CCJ", "BWXT", "SMR", "OKLO"]},
+    "geothermal":              {"primary": None, "peers": ["ORA"]},
+    "behind-the-meter power":  {"primary": None, "peers": ["ENPH", "BE", "GEV"]},
+    "grid / utilities":        {"primary": None, "peers": ["ETN", "POWL", "HUBB"]},
+    "gigawatt-scale build":    {"primary": None, "peers": ["VRT", "ETN", "GEV"]},
+    "hyperscaler capex":       {"primary": None, "peers": ["MSFT", "GOOGL", "AMZN", "META"]},
+}
+# Signals that are entities with NO public ticker at all -- skip straight to
+# a clean "not applicable" answer instead of letting the model guess.
+PRIVATE_COMPANIES = {"twitter", "x"}
+
+_market_data_cache: dict = {}
+
+
+def fetch_market_data(ticker: str):
+    """Real, verified market data for one ticker: price, market cap, 30-day
+    % change, sector. Returns None if the ticker can't be resolved -- this
+    is what protects against grounding on a company that doesn't actually
+    trade, or a delisted/mistyped symbol."""
+    if ticker in _market_data_cache:
+        return _market_data_cache[ticker]
+    if not _ensure_package("yfinance"):
+        return None
+    import yfinance as yf
+    try:
+        t = yf.Ticker(ticker)
+        fi = t.fast_info
+        price = fi.get("lastPrice")
+        mcap = fi.get("marketCap")
+        if not price:
+            _market_data_cache[ticker] = None
+            return None
+        hist = t.history(period="45d")
+        change_30d = None
+        if len(hist) >= 20:
+            past_close = float(hist["Close"].iloc[0])
+            if past_close:
+                change_30d = round(100 * (float(price) - past_close) / past_close, 1)
+        sector = ""
+        try:
+            info = t.info
+            sector = info.get("sector", "") or info.get("industry", "")
+        except Exception:
+            pass
+        result = {
+            "ticker": ticker,
+            "price": round(float(price), 2),
+            "market_cap": int(mcap) if mcap else None,
+            "change_30d": change_30d,
+            "sector": sector,
+        }
+        _market_data_cache[ticker] = result
+        return result
+    except Exception:
+        _market_data_cache[ticker] = None
+        return None
+
+
+def basket_move_summary(quotes: list) -> str:
+    """Does the whole peer basket move together (sector-wide trend) or did
+    one company move while its peers didn't (company-specific story)? This
+    is the peer-comparison layer (NEW) -- computed from real data, not asked
+    of the model."""
+    valid = [q for q in quotes if q and q.get("change_30d") is not None]
+    if len(valid) < 2:
+        return "insufficient peer data to compare"
+    changes = [q["change_30d"] for q in valid]
+    same_dir = sum(1 for c in changes if (c > 0) == (changes[0] > 0))
+    spread = max(changes) - min(changes)
+    if same_dir == len(changes) and spread < 15:
+        return (f"SECTOR-WIDE: all {len(valid)} moved the same direction "
+                f"({min(changes):+.1f}% to {max(changes):+.1f}%) -- looks like a "
+                f"broad trend, not one company's story.")
+    elif same_dir == len(changes):
+        return (f"SECTOR-WIDE but uneven: all moved the same direction, "
+                f"but with a wide {spread:.1f}-point spread between them.")
+    else:
+        parts = [f"{q['ticker']} {q['change_30d']:+.1f}%" for q in valid]
+        return "DIVERGED: not moving together (" + ", ".join(parts) + ")."
+
+
+def _fmt_quote_line(q: dict) -> str:
+    chg = "n/a" if q["change_30d"] is None else f"{q['change_30d']:+.1f}%"
+    cap = "n/a" if not q["market_cap"] else f"${q['market_cap'] / 1e9:.1f}B"
+    return (f"- {q['ticker']}: ${q['price']} | 30-day change: {chg} | "
+            f"market cap: {cap} | sector: {q['sector'] or 'n/a'}")
+
 
 def opportunity_node(state):
     print("[opportunity] mapping top signals to investable exposure...")
+    today_str = datetime.now().strftime("%B %d, %Y")
+    date_context = (
+        f"Today's real date is {today_str}. Any earnings report, filing, or "
+        f"announcement you reference as a future trigger MUST be a plausible "
+        f"real date after {today_str} -- never reuse a stale date from your "
+        f"training data (e.g. do not say 'Q2 2023 earnings').\n\n"
+    )
     signals = state.get("signals", [])
     top = [s for s in signals if s["status"] in OPPORTUNITY_STATUSES][:MAX_OPPORTUNITIES]
     if not top:
@@ -837,39 +957,129 @@ def opportunity_node(state):
 
     opportunities = []
     for s in top:
+        term_key = s["term"].lower().strip()
         vel_text = "new (no baseline)" if s["velocity"] is None else f"{s['velocity']}x"
-        out = llm_call(
-            "You are a skeptical equity research analyst working for an internal "
-            "strategy team. You do NOT give buy/sell directives or personalized "
-            "investment advice -- you map a market signal to PUBLIC companies with "
-            "real exposure, then lay out the bull case, the bear case, and a "
-            "concrete falsifiable trigger. Do NOT invent specific factual claims "
-            "about a company (which cloud vendor it uses, which specific product "
-            "depends on which) unless you are highly confident it is accurate. "
-            "Tag every company in EXPOSURE as [CONFIRMED] only if the connection "
-            "is a well-known, verifiable fact, or [LIKELY] if you are inferring a "
-            "plausible but unverified connection. If you are not confident a "
-            "company has real, direct exposure at all, say so explicitly instead "
-            "of guessing or padding the list.",
-            f"Signal: {s['term']} -- status: {s['status']}, velocity: {vel_text}, "
-            f"mentioned on {s['breadth']} show(s) this week ({', '.join(s['shows'])}).\n\n"
-            "Respond in exactly these four labelled parts:\n"
-            "EXPOSURE: 2-4 public companies/tickers with real, direct exposure to "
-            "this signal, each tagged [CONFIRMED] or [LIKELY] per the rule above "
-            "(write 'no clear public exposure' if none fit).\n"
-            "BULL CASE: why this signal, if it keeps accelerating, benefits them.\n"
-            "BEAR CASE: why this could stall out, reverse, or already be priced in.\n"
-            "CONFIRM/KILL TRIGGER: one concrete, checkable thing -- a filing, an "
-            "earnings line, a capacity announcement -- that would validate or "
-            "invalidate this within 30-60 days.",
-        )
-        opportunities.append({
-            "signal": s["term"],
-            "status": s["status"],
-            "velocity": s["velocity"],
-            "breadth": s["breadth"],
-            "analysis": out,
-        })
+
+        if term_key in PRIVATE_COMPANIES:
+            opportunities.append({
+                "signal": s["term"], "status": s["status"], "velocity": s["velocity"],
+                "breadth": s["breadth"],
+                "analysis": ("EXPOSURE: no public ticker -- this entity is privately "
+                             "held, so there is no direct public-market exposure to "
+                             "track.\nBULL CASE: n/a\nBEAR CASE: n/a\n"
+                             "CONFIRM/KILL TRIGGER: n/a"),
+                "data_grounded": True,
+            })
+            continue
+
+        mapping = TICKER_MAP.get(term_key)
+        grounded_ok = False
+
+        if mapping:
+            primary = mapping["primary"]
+            peer_tickers = mapping["peers"]
+            all_tickers = ([primary] if primary else []) + peer_tickers
+            quotes = {t: fetch_market_data(t) for t in all_tickers}
+            primary_q = quotes.get(primary) if primary else None
+            peer_qs = [quotes[t] for t in peer_tickers if quotes.get(t)]
+            all_valid = ([primary_q] if primary_q else []) + peer_qs
+
+            if (primary and primary_q) or (not primary and peer_qs):
+                grounded_ok = True
+                move_summary = basket_move_summary(all_valid)
+
+                if primary:
+                    prompt_data = (
+                        f"PRIMARY COMPANY (this signal is specifically about this one):\n"
+                        f"{_fmt_quote_line(primary_q)}\n\n"
+                        f"PEER CONTEXT ONLY (NOT independently exposed -- these exist "
+                        f"purely to show whether the primary company's move is part of "
+                        f"a sector-wide trend or is its own story):\n" +
+                        "\n".join(_fmt_quote_line(q) for q in peer_qs)
+                    )
+                    exposure_instruction = (
+                        f"EXPOSURE: one short paragraph on why {primary} specifically "
+                        f"is exposed to this signal, citing its actual 30-day move. Do "
+                        f"NOT evaluate whether the peer tickers are 'exposed' -- they "
+                        f"are comparison context only, not separate candidates."
+                    )
+                else:
+                    prompt_data = (
+                        "CANDIDATE COMPANIES (each independently exposed to this "
+                        "theme -- evaluate each on its own):\n" +
+                        "\n".join(_fmt_quote_line(q) for q in peer_qs)
+                    )
+                    exposure_instruction = (
+                        "EXPOSURE: for each ticker above, one line on whether and why "
+                        "it's exposed to this signal, citing its actual 30-day move "
+                        "from the data."
+                    )
+
+                out = llm_call(
+                    date_context +
+                    "You are a skeptical equity research analyst working for an "
+                    "internal strategy team. You do NOT give buy/sell directives or "
+                    "personalized investment advice. You have been given REAL, "
+                    "VERIFIED market data below -- use ONLY these numbers, do not "
+                    "invent additional statistics, prices, or company relationships "
+                    "not present in the data.",
+                    f"Signal: {s['term']} -- status: {s['status']}, velocity: "
+                    f"{vel_text}, mentioned on {s['breadth']} show(s) this week "
+                    f"({', '.join(s['shows'])}).\n\n"
+                    f"VERIFIED MARKET DATA (real, as of today):\n{prompt_data}\n\n"
+                    f"PEER COMPARISON: {move_summary}\n\n"
+                    "Respond in exactly these four labelled parts:\n"
+                    f"{exposure_instruction}\n"
+                    "BULL CASE: why this signal, if it keeps accelerating, benefits "
+                    "the exposed compan(ies) -- reference whether the move is "
+                    "sector-wide or company-specific.\n"
+                    "BEAR CASE: why this could stall out, reverse, or already be "
+                    "priced in.\n"
+                    "CONFIRM/KILL TRIGGER: one concrete, checkable thing -- a "
+                    "filing, an earnings line, a capacity announcement -- that "
+                    "would validate or invalidate this within 30-60 days.",
+                )
+                opportunities.append({
+                    "signal": s["term"], "status": s["status"], "velocity": s["velocity"],
+                    "breadth": s["breadth"], "analysis": out, "data_grounded": True,
+                })
+
+        if not grounded_ok:
+            if mapping:
+                print(f"             (no market data reachable for {term_key} -- "
+                      f"falling back to ungrounded reasoning)")
+            out = llm_call(
+                date_context +
+                "You are a skeptical equity research analyst working for an internal "
+                "strategy team. You do NOT give buy/sell directives or personalized "
+                "investment advice -- you map a market signal to PUBLIC companies "
+                "with real exposure, then lay out the bull case, the bear case, and "
+                "a concrete falsifiable trigger. Do NOT invent specific factual "
+                "claims about a company unless you are highly confident it is "
+                "accurate. Tag every company in EXPOSURE as [CONFIRMED] only if the "
+                "connection is a well-known, verifiable fact, or [LIKELY] if "
+                "inferring an unverified connection. If unsure a company has real "
+                "exposure, say so.",
+                f"Signal: {s['term']} -- status: {s['status']}, velocity: {vel_text}, "
+                f"mentioned on {s['breadth']} show(s) this week ({', '.join(s['shows'])}).\n\n"
+                "NOTE: no verified market data is available for this signal -- "
+                "reason carefully and flag uncertainty.\n\n"
+                "Respond in exactly these four labelled parts:\n"
+                "EXPOSURE: 2-4 public companies/tickers with real, direct exposure "
+                "to this signal, each tagged [CONFIRMED] or [LIKELY] (write 'no "
+                "clear public exposure' if none fit).\n"
+                "BULL CASE: why this signal, if it keeps accelerating, benefits "
+                "them.\n"
+                "BEAR CASE: why this could stall out, reverse, or already be "
+                "priced in.\n"
+                "CONFIRM/KILL TRIGGER: one concrete, checkable thing -- a filing, "
+                "an earnings line, a capacity announcement -- that would validate "
+                "or invalidate this within 30-60 days.",
+            )
+            opportunities.append({
+                "signal": s["term"], "status": s["status"], "velocity": s["velocity"],
+                "breadth": s["breadth"], "analysis": out, "data_grounded": False,
+            })
     return {"opportunities": opportunities}
 
 
@@ -1426,8 +1636,12 @@ def render_pdf(synthesis, episodes, bible, signals, opportunities, red_team,
                            "not a buy/sell recommendation.</i>", sub),
                  Spacer(1, 4)]
         for o in opportunities:
+            grounded = o.get("data_grounded", False)
+            tag = ('<font color="#2e7d32">&#10003; data-verified</font>' if grounded
+                   else '<font color="#b45309">&#9888; model-inferred, unverified</font>')
             card = Table(
-                [[Paragraph(f"<b>{o['signal']}</b> &nbsp;·&nbsp; {o['status']}", name)]],
+                [[Paragraph(f"<b>{o['signal']}</b> &nbsp;·&nbsp; {o['status']} "
+                            f"&nbsp;·&nbsp; {tag}", name)]],
                 colWidths=[usable])
             card.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0)]))
             flow.append(card)
