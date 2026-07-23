@@ -603,7 +603,16 @@ def compute_signals(history: dict) -> list:
         velocity = c["count"] / max(base_weekly, 0.5)
         breadth = len(c["shows"])
         if b["count"] == 0 and c["count"] >= 8:
-            status = "FRINGE RISING"        # never seen before, suddenly loud
+            # New AND loud -- but breadth decides WHICH story it is. A term on
+            # 5 shows isn't "fringe," it's already broad; only 1-2 shows is the
+            # true fringe early-warning. (Without this, nuclear at breadth 5 was
+            # mislabeled FRINGE when it's actually consensus forming.)
+            if breadth >= 4:
+                status = "GOING MAINSTREAM"
+            elif breadth == 3:
+                status = "EMERGING"
+            else:
+                status = "FRINGE RISING"
         elif b["count"] == 0:
             status = "NEW"
         elif velocity >= 3 and breadth <= 2:
