@@ -1289,7 +1289,8 @@ def report_node(state):
         "baseline_days": BASELINE_DAYS,
         "new_episodes": [
             {"podcast": e["podcast"], "title": e["title"],
-             "published": e["published"], "relevance": e.get("relevance", "N/A")}
+             "published": e["published"], "relevance": e.get("relevance", "N/A"),
+             "analysis": e.get("analysis", "")}
             for e in eps
         ],
         "signals": [{k: v for k, v in s.items() if k != "score"}
@@ -1298,6 +1299,10 @@ def report_node(state):
         "track_record": state.get("track_record", {}),
         "synthesis": state.get("synthesis", ""),
         "red_team": state.get("red_team", ""),
+        # Full episode analysis text + the bible note used to live only in the
+        # PDF -- now saved to JSON too so the boss-facing dashboard
+        # (publish_dashboard.py) can render them without re-parsing PDFs.
+        "bible": state.get("bible"),
     }
     with open(SIGNALS_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=1)
@@ -1762,6 +1767,15 @@ def _run():
     if final.get("pdf_path") and EMAIL_TO != "your.email@example.com":
         print("Opening a Mail DRAFT for you to review (nothing is sent)...")
         open_email_draft(final["pdf_path"], EMAIL_TO)
+
+    # Rebuild the boss-facing HTML dashboard from what we just wrote to
+    # signals_latest.json, and push it if the site repo is set up (see
+    # SETUP.md). Best-effort: never breaks the scan itself.
+    try:
+        import publish_dashboard
+        publish_dashboard.publish()
+    except Exception as e:
+        print(f"[dashboard] skipped publishing this run: {e}")
 
 
 if __name__ == "__main__":

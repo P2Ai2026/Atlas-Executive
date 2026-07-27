@@ -134,9 +134,27 @@ def main():
     print("[weekly] synthesizing across this week's signals + opportunities...")
     synthesis = weekly_synthesis(data, track_record)
 
-    out_path = os.path.join(OUTPUT_DIR, f"weekly_rollup_{datetime.now():%Y%m%d}.pdf")
+    stamp = datetime.now().strftime("%Y%m%d")
+    out_path = os.path.join(OUTPUT_DIR, f"weekly_rollup_{stamp}.pdf")
     render_weekly_pdf(synthesis, track_record, out_path)
     print(f"\nWeekly rollup saved: {out_path}")
+
+    # Also save the same synthesis as JSON so publish_dashboard.py can render
+    # a clean HTML version for the boss-facing site (no PDF re-parsing).
+    json_path = os.path.join(OUTPUT_DIR, f"weekly_rollup_{stamp}.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "generated": datetime.now().isoformat(timespec="seconds"),
+            "week_ending": datetime.now().strftime("%Y-%m-%d"),
+            "synthesis": synthesis,
+            "track_record": track_record,
+        }, f, indent=1)
+
+    try:
+        import publish_dashboard
+        publish_dashboard.publish()
+    except Exception as e:
+        print(f"[dashboard] skipped publishing this run: {e}")
 
 
 if __name__ == "__main__":

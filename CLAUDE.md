@@ -14,6 +14,11 @@ core product.
 - `agents/podcast/` — daily podcast signal scanner (LangGraph + local Ollama).
   Writes `signals_latest.json` (read by the app) and `signal_history.json`
   (per-episode term counts — the memory behind velocity/breadth math).
+  `agents/podcast/publish_dashboard.py` reads that same JSON (no new LLM
+  calls, no re-fetching) and rebuilds a clean HTML boss-facing brief into
+  `docs/` in THIS repo, then commits+pushes it (GitHub Pages serves it from
+  `main` /docs). Called automatically at the end of `podcast_intel_agent.py`
+  and `weekly_rollup.py`. See the exception to rule 3 below.
 - `agents/stocks/` — weekly SEC-filing scanner (`weekly_run.py` entry).
 - Each agent has its own `.venv` (gitignored) + `requirements.txt`.
 
@@ -24,6 +29,10 @@ core product.
 2. **No secrets in the repo.** Keys/config live in `~/.exec-assistant-config.json`.
 3. **Data stays out of git**: reports, signal history, transcript caches live in
    `~/Desktop/Agent 3- Podcast Reviews/` and `~/Desktop/Distress Reports/`.
+   **Exception (by explicit user decision):** `docs/` holds generated
+   boss-facing HTML built by `publish_dashboard.py` and IS committed/pushed,
+   so GitHub Pages can serve it. This is the one deliberate carve-out from
+   this rule — don't extend it to other data without asking first.
 4. **Signal counts are computed in code, not by the model.** LLMs may nominate
    terms; counting happens with regex on transcripts. Keep it that way — the
    numbers must be real. Deterministic routing in agent graphs; token budgets
