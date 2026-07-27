@@ -82,9 +82,15 @@ for _imp, _pip in [("requests", "requests"),
                    ("langgraph", "langgraph")]:
     _ensure_package(_imp, _pip)
 
+import socket
 import requests
 import feedparser
 from langgraph.graph import StateGraph, START, END
+
+# feedparser.parse() has no timeout of its own; a slow feed server would
+# otherwise hang the whole scan. A global socket timeout caps every
+# network read the agent makes that doesn't already set one.
+socket.setdefaulttimeout(30)
 
 
 # =====================================================================
@@ -156,7 +162,13 @@ LOOKBACK_DAYS  = 2             # daily run; 2-day window so nothing slips throug
 BASELINE_DAYS  = 21            # trailing baseline the current week is compared to
 WINDOW_DAYS    = 7             # "current" window for velocity/breadth math
 
-TRANSCRIPT_MODE   = "auto"     # feed transcript if present, else local Whisper
+# "feed"    : feed-provided transcript when present, else the episode's show
+#             notes/description. NEVER downloads audio -- instant, can't hang.
+# "auto"    : feed transcript, else local Whisper (slow, CPU-bound, fragile).
+# "whisper" : always transcribe audio locally.
+# Default is "feed" -- Whisper on this machine kept hanging for an hour+.
+TRANSCRIPT_MODE   = "feed"
+SHOW_NOTES_FALLBACK = True     # in "feed" mode, use show notes when no transcript
 WHISPER_MODEL     = "base"
 MAX_AUDIO_MINUTES = 150
 
@@ -258,11 +270,20 @@ def recent_episodes(feed_url: str, lookback_days: int) -> list:
             tr = entry.get("podcast_transcript") or entry.get("transcript")
             if isinstance(tr, dict):
                 transcript_url = tr.get("url") or tr.get("href")
+        # Show notes / description — our fallback when no transcript exists.
+        # Prefer the full <content>, then summary/description. Strip HTML.
+        notes = ""
+        if entry.get("content"):
+            notes = entry["content"][0].get("value", "") if entry["content"] else ""
+        notes = notes or entry.get("summary", "") or entry.get("description", "")
+        notes = re.sub(r"<[^>]+>", " ", notes)          # strip HTML tags
+        notes = re.sub(r"\s+", " ", notes).strip()
         out.append({
             "title": entry.get("title", "Untitled"),
             "published": when.strftime("%Y-%m-%d"),
             "audio_url": audio_url,
             "transcript_url": transcript_url,
+            "notes": notes,
         })
     out.sort(key=lambda e: e["published"], reverse=True)
     return out
@@ -603,7 +624,16 @@ def compute_signals(history: dict) -> list:
         velocity = c["count"] / max(base_weekly, 0.5)
         breadth = len(c["shows"])
         if b["count"] == 0 and c["count"] >= 8:
-            status = "FRINGE RISING"        # never seen before, suddenly loud
+            # New AND loud -- but breadth decides WHICH story it is. A term on
+            # 5 shows isn't "fringe," it's already broad; only 1-2 shows is the
+            # true fringe early-warning. (Without this, nuclear at breadth 5 was
+            # mislabeled FRINGE when it's actually consensus forming.)
+            if breadth >= 4:
+                status = "GOING MAINSTREAM"
+            elif breadth == 3:
+                status = "EMERGING"
+            else:
+                status = "FRINGE RISING"
         elif b["count"] == 0:
             status = "NEW"
         elif velocity >= 3 and breadth <= 2:
@@ -1340,14 +1370,21 @@ def get_transcript(ep) -> str:
 
 
 def _get_transcript_raw(ep) -> str:
+    # 1) A real transcript, if the feed provides one (free, instant, full text).
     if TRANSCRIPT_MODE in ("feed", "auto") and ep.get("transcript_url"):
         text = _fetch_transcript_url(ep["transcript_url"])
         if text:
             return text
-        if TRANSCRIPT_MODE == "feed":
-            return "[no transcript in feed]"
+
+    # 2) "feed" mode: fall back to show notes instead of transcribing audio.
+    #    Lighter than a transcript, but instant and it can never hang.
     if TRANSCRIPT_MODE == "feed":
-        return "[no transcript in feed]"
+        notes = ep.get("notes", "")
+        if SHOW_NOTES_FALLBACK and len(notes) > 120:   # skip empty/boilerplate
+            return notes
+        return "[no transcript or usable show notes]"
+
+    # 3) "auto"/"whisper": local Whisper (slow, CPU-bound — kept as an option).
     if not ep.get("audio_url"):
         return "[no audio to transcribe]"
     return _whisper_transcribe(ep["audio_url"])

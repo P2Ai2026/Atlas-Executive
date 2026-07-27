@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, shell, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -80,9 +80,23 @@ function runScheduledAgent(key) {
   }
 }
 
+// Has a podcast scan already been recorded on disk today? Used by the
+// self-healing scheduler so a Mac that was asleep at 07:30 still scans on wake,
+// without re-running a scan that already happened.
+function podcastScanDoneToday() {
+  try {
+    const sig = getSignals();
+    if (!sig?.generated) return false;
+    return new Date(sig.generated).toDateString() === new Date().toDateString();
+  } catch { return false; }
+}
+
 app.whenReady().then(() => {
   createWindow();
-  scheduler.start(runDigest, runScheduledAgent);
+  scheduler.start(runDigest, runScheduledAgent, podcastScanDoneToday);
+  // On wake, re-check immediately — the interval alone could add 30s, and wake
+  // is exactly the case that used to miss the morning scan entirely.
+  powerMonitor.on('resume', () => scheduler.tick());
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
