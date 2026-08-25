@@ -62,6 +62,13 @@
    "pretty_date": "Aug 24, 2026",
    "filename": "2026-08-24.html",
    "quick_take": "No new episodes and no active signals today."
+  },
+  {
+   "type": "daily",
+   "date": "2026-08-25",
+   "pretty_date": "Aug 25, 2026",
+   "filename": "2026-08-25.html",
+   "quick_take": "No new episodes and no active signals today."
   }
  ]
 }
