@@ -160,6 +160,13 @@
    "pretty_date": "Sep 15, 2026",
    "filename": "2026-09-15.html",
    "quick_take": "<strong>Daily Brief</strong>"
+  },
+  {
+   "type": "daily",
+   "date": "2026-09-18",
+   "pretty_date": "Sep 18, 2026",
+   "filename": "2026-09-18.html",
+   "quick_take": "<strong>Daily Brief</strong>"
   }
  ]
 }
